@@ -12,8 +12,9 @@ A Model Context Protocol (MCP) server for intelligent multi-provider image gener
 - **Multi-Provider Support** - OpenAI GPT-Image-1 and Google Gemini
 - **Reference Images** - Up to 14 images for character/style consistency (Gemini)
 - **Real-time Data** - Google Search grounding for current info (Gemini)
+- **Conversational History** - Iteratively refine images with context (Gemini)
 - **High Resolution** - Up to 4K output (Gemini)
-- **Full-quality PNGs** - Images saved to `~/Downloads/images/`
+- **Flexible Storage** - Save to `~/Downloads/images/` or custom locations
 
 ## Architecture
 
@@ -256,6 +257,18 @@ generate_image(prompt="...", provider="openai")
 generate_image(prompt="...", provider="gemini")
 ```
 
+### Save Location
+
+Specify a custom save path (directory or filename) with `output_path`:
+
+```
+# Save to specific directory (auto-generated filename)
+generate_image(prompt="...", output_path="~/Desktop/logos/")
+
+# Save to specific file
+generate_image(prompt="...", output_path="~/Desktop/logos/my-logo.png")
+```
+
 ### Gemini-Specific Features
 
 ```
@@ -277,7 +290,8 @@ generate_image(prompt="Current weather in NYC", enable_google_search=True)
 | Tool | Description |
 |------|-------------|
 | `generate_image` | Main tool with auto provider selection |
-| `conversational_image` | Multi-turn refinement |
+| `conversational_image` | Multi-turn refinement with history |
+| `list_conversations` | List active conversations and their history |
 | `list_providers` | Show available providers and capabilities |
 | `list_gemini_models` | Query available Gemini image models |
 
