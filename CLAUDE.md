@@ -1,59 +1,82 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Instructions for Claude Code when working with this repository.
 
 ## Project Overview
 
-**imagen-mcp** is a Python MCP (Model Context Protocol) server that provides intelligent multi-provider image generation to Claude Desktop. It automatically selects the best provider based on your prompt.
+**imagen-mcp** is a Python MCP server providing multi-provider image generation to Claude Desktop. It automatically selects the best provider based on prompt analysis.
 
-### Supported Providers
+## Supported Providers
 
 | Provider | Model | Best For |
 |----------|-------|----------|
 | **OpenAI** | GPT-Image-1 | Text rendering, infographics, comics, diagrams |
-| **Gemini** | Nano Banana Pro (default) | Portraits, product photography, 4K output |
-| **Gemini** | Gemini 2.0 Flash (experimental) | Fast generation, experimentation |
-| **Gemini** | Imagen 3.0 | Alternative image model |
+| **Gemini** | Nano Banana Pro | Portraits, product photography, 4K output |
 
-### Key Features
+## Commands
 
-- **Auto Provider Selection** - Analyzes prompts to choose the best provider
-- **Multi-turn Conversations** - Iterative refinement with context preservation
-- **Pre-Generation Dialogue** - Guided questions refine vision before generating
-- **Reference Images** - Up to 14 images for character/style consistency (Gemini)
-- **Real-time Data** - Google Search grounding for current info (Gemini)
-- **Full-quality PNGs** - High-resolution images saved to ~/Downloads/images/
-
-## Development Commands
-
-### Setup
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Set API keys (at least one required)
-export OPENAI_API_KEY="your-openai-key"
-export GEMINI_API_KEY="your-gemini-key"  # Or GOOGLE_API_KEY
-```
-
-### Testing
-```bash
-# Test new architecture loads
-python3 -c "from src.server import mcp; print('✅ Server loads')"
+# Test server loads
+python3 -c "from src.server import mcp; print('OK')"
 
 # Test providers
 python3 -c "from src.providers import get_provider_registry; print(get_provider_registry().list_providers())"
-
-# Run tests
-pytest
 
 # Check logs
 tail -f ~/Library/Logs/Claude/mcp-server-imagen.log
 ```
 
-### Claude Desktop Configuration
+## Architecture
 
-**macOS** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+```
+src/
+├── server.py                 # MCP entry point
+├── config/
+│   ├── constants.py          # Provider constants, keywords
+│   └── settings.py           # Environment configuration
+├── providers/
+│   ├── base.py               # Abstract ImageProvider interface
+│   ├── openai_provider.py    # OpenAI implementation
+│   ├── gemini_provider.py    # Gemini implementation
+│   ├── selector.py           # Auto-selection logic
+│   └── registry.py           # Provider factory
+└── models/
+    └── input_models.py       # Pydantic input models
+```
+
+## Provider Selection
+
+1. User submits prompt to `generate_image`
+2. `ProviderSelector` analyzes prompt for keywords
+3. Hard requirements force provider (reference images → Gemini, 4K → Gemini)
+4. Soft preferences score each provider
+5. Selected provider generates image
+
+## MCP Tools
+
+- `generate_image` - Main tool with auto provider selection
+- `conversational_image` - Multi-turn refinement
+- `list_providers` - Show available providers
+- `list_gemini_models` - Query Gemini models
+
+## Key Files
+
+- `src/server.py` - MCP tools and entry point
+- `src/providers/selector.py` - Provider selection logic
+- `src/providers/openai_provider.py` - OpenAI GPT-Image-1
+- `src/providers/gemini_provider.py` - Gemini Nano Banana Pro
+- `src/config/constants.py` - Keywords for selection
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `OPENAI_API_KEY` | OpenAI API key |
+| `GEMINI_API_KEY` | Gemini API key (or `GOOGLE_API_KEY`) |
+| `DEFAULT_PROVIDER` | "auto", "openai", or "gemini" |
+
+## Claude Desktop Config
+
 ```json
 {
   "mcpServers": {
@@ -69,188 +92,3 @@ tail -f ~/Library/Logs/Claude/mcp-server-imagen.log
   }
 }
 ```
-
-## Architecture
-
-### Multi-Provider Design
-
-```
-src/
-├── server.py                 # MCP entry point with unified tools
-├── config/
-│   ├── constants.py          # Provider constants, keywords
-│   └── settings.py           # Environment configuration
-├── providers/
-│   ├── base.py               # Abstract ImageProvider interface
-│   ├── openai_provider.py    # OpenAI GPT-Image-1 implementation
-│   ├── gemini_provider.py    # Gemini Nano Banana Pro implementation
-│   ├── selector.py           # Auto-selection logic
-│   └── registry.py           # Provider factory
-├── models/
-│   └── input_models.py       # Pydantic input models
-└── services/                 # Dialogue, enhancement, storage
-```
-
-### Provider Selection Flow
-
-1. User submits prompt to `generate_image` tool
-2. `ProviderSelector` analyzes prompt for:
-   - Text rendering keywords → OpenAI
-   - Portrait/product keywords → Gemini
-   - Reference images → Gemini (required)
-   - Google Search grounding → Gemini (required)
-   - 4K resolution → Gemini (required)
-3. Selected provider generates image
-4. Result returned with provider reasoning
-
-### Provider Capabilities
-
-| Feature | OpenAI | Gemini |
-|---------|--------|--------|
-| Text Rendering | ⭐⭐⭐ Excellent | ⭐⭐ Good |
-| Photorealism | ⭐⭐ Good | ⭐⭐⭐ Excellent |
-| Speed | ~60s | ~15s |
-| Max Resolution | 1536x1024 | 4K |
-| Sizes | 1024x1024, 1024x1536, 1536x1024 | 1K, 2K, 4K |
-| Aspect Ratios | 3 | 10 |
-| Reference Images | ❌ | ✅ (up to 14) |
-| Real-time Data | ❌ | ✅ (Google Search) |
-| Thinking Mode | ❌ | ✅ |
-
-## MCP Tools
-
-### `generate_image`
-Main tool for image generation with auto provider selection.
-
-```python
-# Auto-selects OpenAI (text rendering)
-generate_image(prompt="Menu card for Italian restaurant with prices")
-
-# Auto-selects Gemini (portrait)
-generate_image(prompt="Professional headshot with studio lighting")
-
-# Force specific provider
-generate_image(prompt="...", provider="gemini")
-
-# Use specific Gemini model
-generate_image(prompt="...", provider="gemini", gemini_model="gemini-2.0-flash-exp-image-generation")
-
-# Use reference images (auto-selects Gemini)
-generate_image(prompt="...", reference_images=["base64..."])
-```
-
-### `conversational_image`
-Multi-turn refinement with dialogue system.
-
-### `list_providers`
-Show available providers and their capabilities.
-
-### `list_gemini_models`
-Query available Gemini image models from the API.
-
-## Key Implementation Details
-
-### OpenAI Provider (`src/providers/openai_provider.py`)
-
-Uses Responses API with forced tool calling:
-```python
-payload = {
-    "model": "gpt-4o",
-    "tools": [{"function": {"name": "generate_image"}}],
-    "tool_choice": {"function": {"name": "generate_image"}},
-}
-# → Extracts image from tool call → Calls /images/generations
-```
-
-### Gemini Provider (`src/providers/gemini_provider.py`)
-
-Uses official Google GenAI SDK:
-```python
-from google import genai
-from google.genai import types
-
-client = genai.Client(api_key=key)
-response = client.models.generate_content(
-    model="gemini-3-pro-image-preview",
-    contents=[*reference_images, prompt],
-    config=types.GenerateContentConfig(
-        response_modalities=["TEXT", "IMAGE"],
-        image_config=types.ImageConfig(image_size="2K"),
-    ),
-)
-```
-
-### Auto-Selection Keywords
-
-**OpenAI preferred:**
-- text, label, menu, infographic, diagram, comic, dialogue, caption, title, headline, poster, certificate, badge
-
-**Gemini preferred:**
-- portrait, headshot, photo, photorealistic, product, studio, 4k, character consistency, weather, stock, current
-
-**Gemini required:**
-- current weather, today's, real-time, stock price, live (needs Google Search)
-- Any use of reference images
-- 4K resolution
-
-## Environment Variables
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `OPENAI_API_KEY` | OpenAI API key | One of these |
-| `GEMINI_API_KEY` | Google Gemini API key | required |
-| `GOOGLE_API_KEY` | Alias for GEMINI_API_KEY | (alternative) |
-| `DEFAULT_PROVIDER` | Default: "auto" | No |
-| `DEFAULT_OPENAI_SIZE` | Default: "1024x1024" | No |
-| `DEFAULT_GEMINI_SIZE` | Default: "2K" | No |
-| `ENABLE_GOOGLE_SEARCH` | Default: "false" | No |
-
-## Gemini Models
-
-| Model ID | Name | Notes |
-|----------|------|-------|
-| `gemini-3-pro-image-preview` | Nano Banana Pro | Default, highest quality |
-| `gemini-2.0-flash-exp-image-generation` | Gemini 2.0 Flash | Fast experimental |
-| `imagen-3.0-generate-002` | Imagen 3.0 | Alternative model |
-
-Use `list_gemini_models` tool to discover available models with your API key.
-
-## Troubleshooting
-
-### "No providers available"
-Set at least one API key: `OPENAI_API_KEY` or `GEMINI_API_KEY`
-
-### "Gemini provider requires google-genai"
-```bash
-pip install google-genai pillow
-```
-
-### Wrong provider selected
-Use explicit `provider` parameter to override auto-selection.
-
-### Image not saved
-Check ~/Downloads/images/ directory exists and is writable.
-
-## Dependencies
-
-```
-mcp>=1.16.0           # MCP protocol
-fastmcp>=2.12.5       # FastMCP framework
-pydantic>=2.12.3      # Input validation
-httpx>=0.24.0         # OpenAI HTTP client
-google-genai>=1.52.0  # Gemini SDK
-pillow>=10.4.0        # Image processing
-```
-
-## Version History
-
-### v4.0.0 (Current)
-- Multi-provider support (OpenAI + Gemini)
-- Auto provider selection
-- Gemini Nano Banana Pro with full features
-- Restructured as `src/` package
-
-### v3.0.0
-- OpenAI GPT-Image-1 only
-- Phase 1 dialogue system
-- Simplified architecture

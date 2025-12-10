@@ -86,5 +86,6 @@ claude_desktop_config.json.local
 
 # Generated images (if testing locally)
 /tmp/
+temp/
 *.png.local
 test_images/
