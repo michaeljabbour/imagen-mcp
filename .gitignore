@@ -45,6 +45,7 @@ venv.bak/
 .claude/
 *.local.json
 .mcp.json
+CLAUDE.md
 
 # Testing
 .pytest_cache/
