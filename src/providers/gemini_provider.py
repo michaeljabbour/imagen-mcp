@@ -18,6 +18,7 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from ..config.constants import (
+    DEFAULT_GEMINI_IMAGE_MODEL,
     GEMINI_ASPECT_RATIOS,
     GEMINI_MAX_REFERENCE_IMAGES,
     GEMINI_MODELS,
@@ -197,9 +198,10 @@ class GeminiProvider(ImageProvider):
         enable_enhancement: bool = True,
         enable_google_search: bool = False,
         api_key: Optional[str] = None,
+        model: Optional[str] = None,
         **kwargs: Any,
     ) -> ImageResult:
-        """Generate an image using Gemini 3 Pro Image."""
+        """Generate an image using Gemini."""
         start_time = time.time()
 
         try:
@@ -212,6 +214,11 @@ class GeminiProvider(ImageProvider):
             )
             size = validated["size"]
             aspect_ratio = validated["aspect_ratio"]
+
+            # Select model (default to Nano Banana Pro)
+            model_id = model or DEFAULT_GEMINI_IMAGE_MODEL
+            if model_id in GEMINI_MODELS:
+                model_id = GEMINI_MODELS[model_id]
 
             # Generate conversation ID if not provided
             conversation_id = conversation_id or f"gemini_{uuid4().hex[:12]}"
@@ -249,7 +256,7 @@ class GeminiProvider(ImageProvider):
 
             config = types.GenerateContentConfig(**config_args)
 
-            logger.info(f"Generating image with Gemini: size={size}, aspect_ratio={aspect_ratio}")
+            logger.info(f"Generating image with Gemini model={model_id}, size={size}, aspect_ratio={aspect_ratio}")
 
             # Generate content (SDK is synchronous, run in executor)
             loop = asyncio.get_event_loop()
@@ -257,7 +264,7 @@ class GeminiProvider(ImageProvider):
                 None,
                 partial(
                     self._client.models.generate_content,
-                    model=GEMINI_MODELS["gemini-3-pro-image-preview"],
+                    model=model_id,
                     contents=contents,
                     config=config,
                 ),
@@ -278,7 +285,7 @@ class GeminiProvider(ImageProvider):
             return ImageResult(
                 success=True,
                 provider=self.name,
-                model="gemini-3-pro-image-preview",
+                model=model_id,
                 image_path=image_path,
                 image_base64=image_b64,
                 prompt=prompt,
@@ -296,7 +303,7 @@ class GeminiProvider(ImageProvider):
             return ImageResult(
                 success=False,
                 provider=self.name,
-                model="gemini-3-pro-image-preview",
+                model=model or DEFAULT_GEMINI_IMAGE_MODEL,
                 prompt=prompt,
                 error=str(e),
             )

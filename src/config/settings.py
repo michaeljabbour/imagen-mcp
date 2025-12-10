@@ -16,7 +16,7 @@ class Settings:
 
     # API Keys
     openai_api_key: Optional[str] = None
-    gemini_api_key: Optional[str] = None
+    gemini_api_key: Optional[str] = None  # Also checks GOOGLE_API_KEY
 
     # Defaults
     default_provider: str = "auto"  # auto, openai, gemini
@@ -37,9 +37,12 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         """Load settings from environment variables."""
+        # Support both GEMINI_API_KEY and GOOGLE_API_KEY for Gemini
+        gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+
         return cls(
             openai_api_key=os.getenv("OPENAI_API_KEY"),
-            gemini_api_key=os.getenv("GEMINI_API_KEY"),
+            gemini_api_key=gemini_key,
             default_provider=os.getenv("DEFAULT_PROVIDER", "auto"),
             default_openai_size=os.getenv("DEFAULT_OPENAI_SIZE", "1024x1024"),
             default_gemini_size=os.getenv("DEFAULT_GEMINI_SIZE", "2K"),

@@ -101,6 +101,16 @@ class ImageGenerationInput(BaseModel):
         ),
     )
 
+    gemini_model: Optional[str] = Field(
+        default=None,
+        description=(
+            "Specific Gemini model to use (Gemini only). Options:\n"
+            "- 'gemini-3-pro-image-preview': Nano Banana Pro, highest quality (default)\n"
+            "- 'gemini-2.0-flash-exp-image-generation': Fast experimental model\n"
+            "- 'imagen-3.0-generate-002': Imagen 3.0 model"
+        ),
+    )
+
     # Common options
     enhance_prompt: Optional[bool] = Field(
         default=True,
@@ -219,6 +229,17 @@ class ConversationalImageInput(BaseModel):
     enable_google_search: Optional[bool] = Field(
         default=False,
         description="Enable Google Search grounding (Gemini only).",
+    )
+
+    # Gemini-specific
+    gemini_model: Optional[str] = Field(
+        default=None,
+        description=(
+            "Specific Gemini model (Gemini only):\n"
+            "- 'gemini-3-pro-image-preview': Nano Banana Pro (default)\n"
+            "- 'gemini-2.0-flash-exp-image-generation': Fast experimental\n"
+            "- 'imagen-3.0-generate-002': Imagen 3.0"
+        ),
     )
 
     # OpenAI-specific

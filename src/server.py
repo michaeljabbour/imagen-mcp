@@ -195,6 +195,7 @@ async def generate_image(params: ImageGenerationInput):
             enable_enhancement=params.enhance_prompt if params.enhance_prompt is not None else True,
             enable_google_search=params.enable_google_search or False,
             api_key=params.openai_api_key if recommendation.provider == "openai" else params.gemini_api_key,
+            model=params.gemini_model if recommendation.provider == "gemini" else None,
         )
 
         # Format response
@@ -275,6 +276,7 @@ async def conversational_image(params: ConversationalImageInput):
             enable_enhancement=not params.skip_dialogue,
             enable_google_search=params.enable_google_search or False,
             api_key=params.openai_api_key if recommendation.provider == "openai" else params.gemini_api_key,
+            model=params.gemini_model if recommendation.provider == "gemini" else None,
         )
 
         if params.output_format == OutputFormat.JSON:
@@ -317,6 +319,64 @@ async def list_conversations(params: ListConversationsInput):
     """
     # TODO: Implement conversation listing from storage
     return "## 📝 Conversations\n\n*Conversation listing coming soon.*"
+
+
+@mcp.tool(name="list_gemini_models")
+async def list_gemini_models():
+    """List available Gemini models that support image generation.
+
+    Queries the Gemini API to show which models are available for image
+    generation with your API key. Useful for troubleshooting or choosing
+    alternative models.
+
+    Returns:
+        List of available Gemini image models with their capabilities.
+    """
+    import httpx
+
+    settings = get_settings()
+
+    if not settings.has_gemini_key():
+        return "## ❌ No Gemini API Key\n\nSet GEMINI_API_KEY or GOOGLE_API_KEY environment variable."
+
+    api_key = settings.gemini_api_key
+    api_base = "https://generativelanguage.googleapis.com/v1beta"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(f"{api_base}/models?key={api_key}")
+            response.raise_for_status()
+            data = response.json()
+
+        image_models = []
+        for model in data.get("models", []):
+            name = model.get("name", "")
+            methods = model.get("supportedGenerationMethods", [])
+
+            # Check if model might support images
+            if any(x in name.lower() for x in ["image", "imagen", "flash-exp", "nano-banana"]):
+                image_models.append({
+                    "name": name.replace("models/", ""),
+                    "methods": methods,
+                    "description": model.get("description", "")[:100],
+                })
+
+        if not image_models:
+            return "## No Image Models Found\n\nNo image generation models available with current API key."
+
+        lines = ["## Available Gemini Image Models\n"]
+        for m in image_models:
+            lines.append(f"### {m['name']}")
+            lines.append(f"- **Methods:** {', '.join(m['methods'])}")
+            if m["description"]:
+                lines.append(f"- {m['description']}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.error(f"Error listing Gemini models: {e}")
+        return f"## ❌ Error\n\nFailed to list models: {str(e)}"
 
 
 # ============================

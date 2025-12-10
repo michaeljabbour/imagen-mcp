@@ -11,7 +11,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Provider | Model | Best For |
 |----------|-------|----------|
 | **OpenAI** | GPT-Image-1 | Text rendering, infographics, comics, diagrams |
-| **Gemini** | Nano Banana Pro (gemini-3-pro-image-preview) | Portraits, product photography, 4K output |
+| **Gemini** | Nano Banana Pro (default) | Portraits, product photography, 4K output |
+| **Gemini** | Gemini 2.0 Flash (experimental) | Fast generation, experimentation |
+| **Gemini** | Imagen 3.0 | Alternative image model |
 
 ### Key Features
 
@@ -31,7 +33,7 @@ pip install -r requirements.txt
 
 # Set API keys (at least one required)
 export OPENAI_API_KEY="your-openai-key"
-export GEMINI_API_KEY="your-gemini-key"
+export GEMINI_API_KEY="your-gemini-key"  # Or GOOGLE_API_KEY
 ```
 
 ### Testing
@@ -130,6 +132,9 @@ generate_image(prompt="Professional headshot with studio lighting")
 # Force specific provider
 generate_image(prompt="...", provider="gemini")
 
+# Use specific Gemini model
+generate_image(prompt="...", provider="gemini", gemini_model="gemini-2.0-flash-exp-image-generation")
+
 # Use reference images (auto-selects Gemini)
 generate_image(prompt="...", reference_images=["base64..."])
 ```
@@ -139,6 +144,9 @@ Multi-turn refinement with dialogue system.
 
 ### `list_providers`
 Show available providers and their capabilities.
+
+### `list_gemini_models`
+Query available Gemini image models from the API.
 
 ## Key Implementation Details
 
@@ -191,10 +199,21 @@ response = client.models.generate_content(
 |----------|-------------|----------|
 | `OPENAI_API_KEY` | OpenAI API key | One of these |
 | `GEMINI_API_KEY` | Google Gemini API key | required |
+| `GOOGLE_API_KEY` | Alias for GEMINI_API_KEY | (alternative) |
 | `DEFAULT_PROVIDER` | Default: "auto" | No |
 | `DEFAULT_OPENAI_SIZE` | Default: "1024x1024" | No |
 | `DEFAULT_GEMINI_SIZE` | Default: "2K" | No |
 | `ENABLE_GOOGLE_SEARCH` | Default: "false" | No |
+
+## Gemini Models
+
+| Model ID | Name | Notes |
+|----------|------|-------|
+| `gemini-3-pro-image-preview` | Nano Banana Pro | Default, highest quality |
+| `gemini-2.0-flash-exp-image-generation` | Gemini 2.0 Flash | Fast experimental |
+| `imagen-3.0-generate-002` | Imagen 3.0 | Alternative model |
+
+Use `list_gemini_models` tool to discover available models with your API key.
 
 ## Troubleshooting
 

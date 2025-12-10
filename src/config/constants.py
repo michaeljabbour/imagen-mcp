@@ -30,9 +30,18 @@ OPENAI_MODELS = {
 
 # Gemini model identifiers
 GEMINI_MODELS = {
-    "gemini-3-pro-image-preview": "gemini-3-pro-image-preview",  # Nano Banana Pro
-    "gemini-flash-latest": "gemini-flash-latest",  # For prompt enhancement
+    # Nano Banana Pro - highest quality, best for production
+    "gemini-3-pro-image-preview": "gemini-3-pro-image-preview",
+    # Gemini 2.0 Flash - fast experimental image generation
+    "gemini-2.0-flash-exp-image-generation": "gemini-2.0-flash-exp-image-generation",
+    # Imagen 3.0 - alternative image model
+    "imagen-3.0-generate-002": "imagen-3.0-generate-002",
+    # For prompt enhancement (text only)
+    "gemini-flash-latest": "gemini-flash-latest",
 }
+
+# Default Gemini model for image generation
+DEFAULT_GEMINI_IMAGE_MODEL = "gemini-3-pro-image-preview"
 
 # Gemini supports 10 aspect ratios
 GEMINI_ASPECT_RATIOS = [
