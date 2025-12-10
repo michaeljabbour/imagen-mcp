@@ -89,8 +89,9 @@ flowchart TB
 
 | Model ID | Description |
 |----------|-------------|
-| `gpt-image-1` | Primary image generation model (default) |
-| `gpt-4o` | Conversation orchestration |
+| `gpt-image-1` | Dedicated image generation model (default) |
+| `gpt-5-image` | GPT-5 with image generation capabilities |
+| `gpt-5.1` | Latest reasoning model (conversation orchestration) |
 
 ### Gemini Models
 

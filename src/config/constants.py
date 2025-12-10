@@ -19,10 +19,16 @@ OPENAI_SIZES = [
 ]
 
 OPENAI_MODELS = {
-    "gpt-image-1": "gpt-image-1",
-    "gpt-4o": "gpt-4o",  # For conversation orchestration
-    "gpt-4-turbo": "gpt-4-turbo",
+    # Image generation models
+    "gpt-image-1": "gpt-image-1",  # Dedicated image model (April 2025)
+    "gpt-5-image": "gpt-5-image",  # GPT-5 with image generation (Oct 2025)
+    # Conversation orchestration models
+    "gpt-5.1": "gpt-5.1",  # Latest reasoning model (Nov 2025)
+    "gpt-4o": "gpt-4o",  # Multimodal model
 }
+
+# Default OpenAI model for image generation
+DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-1"
 
 # ============================
 # Google Gemini Constants
