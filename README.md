@@ -38,7 +38,9 @@ pip install -r requirements.txt
 
 ## Configuration
 
-Add to your Claude Desktop config:
+At least one API key is required. Both are recommended for auto-selection.
+
+### Claude Desktop
 
 **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
@@ -59,7 +61,80 @@ Add to your Claude Desktop config:
 }
 ```
 
-At least one API key is required. Both are recommended for auto-selection.
+### Claude Code (CLI)
+
+Add to `~/.claude/settings.json` or project `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "imagen": {
+      "command": "python3",
+      "args": ["-m", "src.server"],
+      "cwd": "/path/to/imagen-mcp",
+      "env": {
+        "OPENAI_API_KEY": "sk-...",
+        "GEMINI_API_KEY": "AI..."
+      }
+    }
+  }
+}
+```
+
+Or use the CLI:
+
+```bash
+claude mcp add imagen -s user -- python3 -m src.server --cwd /path/to/imagen-mcp
+```
+
+### Gemini CLI
+
+Add to `~/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "imagen": {
+      "command": "python3",
+      "args": ["-m", "src.server"],
+      "cwd": "/path/to/imagen-mcp",
+      "env": {
+        "OPENAI_API_KEY": "sk-...",
+        "GEMINI_API_KEY": "AI..."
+      }
+    }
+  }
+}
+```
+
+### OpenAI Codex CLI
+
+Add to `~/.codex/config.json`:
+
+```json
+{
+  "mcpServers": {
+    "imagen": {
+      "command": "python3",
+      "args": ["-m", "src.server"],
+      "cwd": "/path/to/imagen-mcp",
+      "env": {
+        "OPENAI_API_KEY": "sk-...",
+        "GEMINI_API_KEY": "AI..."
+      }
+    }
+  }
+}
+```
+
+### Generic MCP Client
+
+For any MCP-compatible client, configure with:
+
+- **Command:** `python3`
+- **Args:** `["-m", "src.server"]`
+- **Working Directory:** `/path/to/imagen-mcp`
+- **Environment:** `OPENAI_API_KEY`, `GEMINI_API_KEY`
 
 ## Usage
 
