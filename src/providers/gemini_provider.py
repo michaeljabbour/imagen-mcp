@@ -156,6 +156,15 @@ class GeminiProvider(ImageProvider):
         # Validate/normalize size (must be uppercase K)
         if size:
             size = size.upper()
+            # Convert OpenAI-style sizes to Gemini equivalents
+            openai_to_gemini = {
+                "1024X1024": "1K",
+                "1024X1536": "2K",
+                "1536X1024": "2K",
+            }
+            if size in openai_to_gemini:
+                logger.info(f"Converting OpenAI size '{size}' to Gemini: {openai_to_gemini[size]}")
+                size = openai_to_gemini[size]
             if size not in GEMINI_SIZES:
                 raise ValueError(
                     f"Invalid size '{size}' for Gemini. Supported sizes: {', '.join(GEMINI_SIZES)}"
@@ -174,7 +183,8 @@ class GeminiProvider(ImageProvider):
             aspect_ratio = "1:1"  # Default
 
         # Validate reference images count
-        reference_images = kwargs.get("reference_images", [])
+        # Use `or []` because dict.get() returns None (not default) when key exists with None value
+        reference_images = kwargs.get("reference_images") or []
         if len(reference_images) > GEMINI_MAX_REFERENCE_IMAGES:
             raise ValueError(f"Too many reference images. Maximum {GEMINI_MAX_REFERENCE_IMAGES}.")
 
