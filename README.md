@@ -2,6 +2,10 @@
 
 A Model Context Protocol (MCP) server for intelligent multi-provider image generation.
 
+[![CI](https://github.com/michaeljabbour/imagen-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/michaeljabbour/imagen-mcp/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 ## Features
 
 - **Auto Provider Selection** - Analyzes prompts to choose the best provider
@@ -10,6 +14,57 @@ A Model Context Protocol (MCP) server for intelligent multi-provider image gener
 - **Real-time Data** - Google Search grounding for current info (Gemini)
 - **High Resolution** - Up to 4K output (Gemini)
 - **Full-quality PNGs** - Images saved to `~/Downloads/images/`
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph Clients["MCP Clients"]
+        CD[Claude Desktop]
+        CC[Claude Code CLI]
+        GC[Gemini CLI]
+        CX[Codex CLI]
+    end
+
+    subgraph Server["imagen-mcp Server"]
+        MCP[MCP Protocol Layer]
+
+        subgraph Tools["MCP Tools"]
+            GI[generate_image]
+            CI[conversational_image]
+            LP[list_providers]
+            LM[list_gemini_models]
+        end
+
+        subgraph Core["Core Components"]
+            PS[Provider Selector]
+            PR[Provider Registry]
+        end
+
+        subgraph Providers["Image Providers"]
+            OAI[OpenAI Provider<br/>GPT-Image-1]
+            GEM[Gemini Provider<br/>Nano Banana Pro]
+        end
+    end
+
+    subgraph APIs["External APIs"]
+        OAPI[OpenAI API]
+        GAPI[Google Gemini API]
+    end
+
+    subgraph Storage["Local Storage"]
+        DL[~/Downloads/images/]
+    end
+
+    CD & CC & GC & CX --> MCP
+    MCP --> Tools
+    GI & CI --> PS
+    PS --> PR
+    PR --> OAI & GEM
+    OAI --> OAPI
+    GEM --> GAPI
+    OAI & GEM --> DL
+```
 
 ## Provider Comparison
 
@@ -28,10 +83,27 @@ A Model Context Protocol (MCP) server for intelligent multi-provider image gener
 
 **Use Gemini for:** Portraits, product photography, 4K output, reference images
 
+## Available Models
+
+### OpenAI Models
+
+| Model ID | Description |
+|----------|-------------|
+| `gpt-image-1` | Primary image generation model (default) |
+| `gpt-4o` | Conversation orchestration |
+
+### Gemini Models
+
+| Model ID | Description |
+|----------|-------------|
+| `gemini-3-pro-image-preview` | Nano Banana Pro - highest quality (default) |
+| `gemini-2.0-flash-exp-image-generation` | Fast experimental |
+| `imagen-3.0-generate-002` | Alternative image model |
+
 ## Installation
 
 ```bash
-git clone https://github.com/yourusername/imagen-mcp.git
+git clone https://github.com/michaeljabbour/imagen-mcp.git
 cd imagen-mcp
 pip install -r requirements.txt
 chmod +x run.sh
@@ -211,6 +283,13 @@ generate_image(prompt="Current weather in NYC", enable_google_search=True)
 ## Development
 
 ```bash
+# Install dev dependencies
+pip install -r requirements.txt
+pip install pytest pytest-asyncio
+
+# Run tests
+pytest tests/ -v
+
 # Test server loads
 python3 -c "from src.server import mcp; print('Server loads')"
 
@@ -238,6 +317,13 @@ imagen-mcp/
 │   │   └── registry.py        # Provider factory
 │   └── models/
 │       └── input_models.py    # Pydantic input models
+├── tests/
+│   ├── test_selector.py       # Provider selection tests
+│   ├── test_providers.py      # Provider unit tests
+│   └── test_server.py         # Server integration tests
+├── .github/
+│   └── workflows/
+│       └── ci.yml             # GitHub Actions CI
 ├── run.sh                     # Wrapper script for MCP clients
 ├── requirements.txt
 ├── CLAUDE.md
@@ -255,14 +341,6 @@ imagen-mcp/
 | `DEFAULT_OPENAI_SIZE` | Default: "1024x1024" | No |
 | `DEFAULT_GEMINI_SIZE` | Default: "2K" | No |
 | `ENABLE_GOOGLE_SEARCH` | Default: "false" | No |
-
-## Gemini Models
-
-| Model ID | Description |
-|----------|-------------|
-| `gemini-3-pro-image-preview` | Default, highest quality |
-| `gemini-2.0-flash-exp-image-generation` | Fast experimental |
-| `imagen-3.0-generate-002` | Alternative model |
 
 ## Requirements
 
