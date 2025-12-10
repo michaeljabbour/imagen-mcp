@@ -137,6 +137,7 @@ class ImageProvider(ABC):
         conversation_id: str | None = None,
         reference_images: list[str] | None = None,
         enable_enhancement: bool = True,
+        output_path: str | None = None,
         **kwargs: Any,
     ) -> ImageResult:
         """
@@ -149,6 +150,7 @@ class ImageProvider(ABC):
             conversation_id: ID for multi-turn conversation
             reference_images: List of base64-encoded reference images
             enable_enhancement: Whether to enhance the prompt
+            output_path: Optional path to save the image
             **kwargs: Provider-specific parameters
 
         Returns:

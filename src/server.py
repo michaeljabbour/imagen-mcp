@@ -209,6 +209,7 @@ async def generate_image(params: ImageGenerationInput) -> str:
             if recommendation.provider == "openai"
             else params.gemini_api_key,
             model=params.gemini_model if recommendation.provider == "gemini" else None,
+            output_path=params.output_path,
         )
 
         # Format response
@@ -292,6 +293,7 @@ async def conversational_image(params: ConversationalImageInput) -> str:
             if recommendation.provider == "openai"
             else params.gemini_api_key,
             model=params.gemini_model if recommendation.provider == "gemini" else None,
+            output_path=params.output_path,
         )
 
         if params.output_format == OutputFormat.JSON:

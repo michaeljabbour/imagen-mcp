@@ -359,6 +359,7 @@ class OpenAIProvider(ImageProvider):
         api_key: str | None = None,
         assistant_model: str = "gpt-4o",
         input_image_file_id: str | None = None,
+        output_path: str | None = None,
         **kwargs: Any,
     ) -> ImageResult:
         """Generate an image using OpenAI GPT-Image-1."""
@@ -395,7 +396,9 @@ class OpenAIProvider(ImageProvider):
                 image_data = result["image_data"]
                 if "b64_json" in image_data:
                     # Save to file
-                    image_path = self._save_image(image_data["b64_json"], prompt)
+                    image_path = self._save_image(
+                        image_data["b64_json"], prompt, output_path=output_path
+                    )
 
             generation_time = time.time() - start_time
 
@@ -424,20 +427,34 @@ class OpenAIProvider(ImageProvider):
                 error=str(e),
             )
 
-    def _save_image(self, b64_json: str, prompt: str) -> Path:
-        """Save base64 image to Downloads folder."""
+    def _save_image(
+        self, b64_json: str, prompt: str, output_path: str | None = None
+    ) -> Path:
+        """Save base64 image to path or Downloads folder."""
         # Decode image
         image_bytes = base64.b64decode(b64_json)
 
-        # Generate filename
+        # Generate default filename parts
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         short_id = uuid4().hex[:8]
         prompt_snippet = "".join(c for c in prompt[:30] if c.isalnum() or c == " ").strip()
         prompt_snippet = prompt_snippet.replace(" ", "_")[:20]
         filename = f"openai_{timestamp}_{prompt_snippet}_{short_id}.png"
 
-        # Save to Downloads/images/
-        save_path = get_downloads_directory() / filename
+        # Determine save location
+        if output_path:
+            path_obj = Path(output_path)
+            # Check if it looks like a directory or file
+            if path_obj.suffix:  # Has extension, treat as file
+                save_path = path_obj
+                # Ensure parent exists
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+            else:  # Treat as directory
+                save_path = path_obj / filename
+                save_path.mkdir(parents=True, exist_ok=True)
+        else:
+            save_path = get_downloads_directory() / filename
+
         with open(save_path, "wb") as f:
             f.write(image_bytes)
 

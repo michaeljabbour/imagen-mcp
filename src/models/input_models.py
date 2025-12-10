@@ -117,6 +117,15 @@ class ImageGenerationInput(BaseModel):
         description="Whether to enhance the prompt for better results.",
     )
 
+    output_path: str | None = Field(
+        default=None,
+        description=(
+            "Optional path to save the generated image. "
+            "If a directory, saves with generated filename. "
+            "If a file path, saves to that exact path."
+        ),
+    )
+
     output_format: OutputFormat | None = Field(
         default=OutputFormat.MARKDOWN,
         description="Output format for the tool response.",
@@ -249,6 +258,15 @@ class ConversationalImageInput(BaseModel):
     )
 
     # Output options
+    output_path: str | None = Field(
+        default=None,
+        description=(
+            "Optional path to save the generated image. "
+            "If a directory, saves with generated filename. "
+            "If a file path, saves to that exact path."
+        ),
+    )
+
     output_format: OutputFormat | None = Field(
         default=OutputFormat.MARKDOWN,
         description="Output format for the tool response.",
