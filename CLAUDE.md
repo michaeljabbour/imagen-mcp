@@ -4,16 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Python MCP (Model Context Protocol) server that provides conversational image generation capabilities to Claude Desktop using OpenAI's GPT-Image-1 model.
+**imagen-mcp** is a Python MCP (Model Context Protocol) server that provides intelligent multi-provider image generation to Claude Desktop. It automatically selects the best provider based on your prompt.
 
-**Phase 1 Features**:
-- **Pre-Generation Dialogue** - Guided questions refine vision before generating (4 modes: quick/guided/explorer/skip)
-- **Automatic Prompt Enhancement** - AI quality analysis and improvement (0-100 scoring)
-- **Image Quality Verification** - Type-specific checklists before delivery
-- **Persistent Conversations** - Local storage in ~/.openai-images-mcp/conversations/
-- **Smart Size Detection** - Auto-suggests dimensions based on image type
-- **Conversational Refinement** - Multi-turn editing with context preservation
-- **Full-quality images** - High-resolution PNGs saved to ~/Downloads/
+### Supported Providers
+
+| Provider | Model | Best For |
+|----------|-------|----------|
+| **OpenAI** | GPT-Image-1 | Text rendering, infographics, comics, diagrams |
+| **Gemini** | Nano Banana Pro (gemini-3-pro-image-preview) | Portraits, product photography, 4K output |
+
+### Key Features
+
+- **Auto Provider Selection** - Analyzes prompts to choose the best provider
+- **Multi-turn Conversations** - Iterative refinement with context preservation
+- **Pre-Generation Dialogue** - Guided questions refine vision before generating
+- **Reference Images** - Up to 14 images for character/style consistency (Gemini)
+- **Real-time Data** - Google Search grounding for current info (Gemini)
+- **Full-quality PNGs** - High-resolution images saved to ~/Downloads/images/
 
 ## Development Commands
 
@@ -22,248 +29,209 @@ This is a Python MCP (Model Context Protocol) server that provides conversationa
 # Install dependencies
 pip install -r requirements.txt
 
-# Set API key (required)
-export OPENAI_API_KEY="your-api-key-here"
+# Set API keys (at least one required)
+export OPENAI_API_KEY="your-openai-key"
+export GEMINI_API_KEY="your-gemini-key"
 ```
 
 ### Testing
 ```bash
-# Test module loads
-python3 -c "import openai_images_mcp; print('✅ Module loads')"
+# Test new architecture loads
+python3 -c "from src.server import mcp; print('✅ Server loads')"
 
-# Run local test suite (interactive)
-python3 test_local.py
+# Test providers
+python3 -c "from src.providers import get_provider_registry; print(get_provider_registry().list_providers())"
 
-# Check logs in real-time
-tail -f ~/Library/Logs/Claude/mcp-server-openai-images.log
+# Run tests
+pytest
+
+# Check logs
+tail -f ~/Library/Logs/Claude/mcp-server-imagen.log
 ```
 
 ### Claude Desktop Configuration
-After changes, restart Claude Desktop to reload the server. Config location:
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
-Log location:
-- macOS: `~/Library/Logs/Claude/mcp-server-openai-images.log`
+**macOS** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "imagen": {
+      "command": "python3",
+      "args": ["-m", "src.server"],
+      "cwd": "/path/to/imagen-mcp",
+      "env": {
+        "OPENAI_API_KEY": "sk-...",
+        "GEMINI_API_KEY": "AI..."
+      }
+    }
+  }
+}
+```
 
 ## Architecture
 
-### Single-API Model (Simplified)
+### Multi-Provider Design
 
-The server uses **only** the Responses API with GPT-Image-1 for all image generation:
-
-- **Conversational approach**: All image generation goes through `/chat/completions` with tool calling
-- **Stateful**: Maintains conversation state in `conversation_store`
-- **Forced tool calling**: Uses `tool_choice` to ensure GPT-4 calls the `generate_image` tool
-- **File ID support**: Images can be uploaded and referenced in subsequent refinements
-
-### State Management
-
-```python
-conversation_store = {}  # conversation_id → [message_history]
-file_store = {}          # file_path → openai_file_id (currently unused)
+```
+src/
+├── server.py                 # MCP entry point with unified tools
+├── config/
+│   ├── constants.py          # Provider constants, keywords
+│   └── settings.py           # Environment configuration
+├── providers/
+│   ├── base.py               # Abstract ImageProvider interface
+│   ├── openai_provider.py    # OpenAI GPT-Image-1 implementation
+│   ├── gemini_provider.py    # Gemini Nano Banana Pro implementation
+│   ├── selector.py           # Auto-selection logic
+│   └── registry.py           # Provider factory
+├── models/
+│   └── input_models.py       # Pydantic input models
+└── services/                 # Dialogue, enhancement, storage
 ```
 
-Both stores are **in-memory only** and cleared on server restart. Conversations are not persisted to disk.
+### Provider Selection Flow
 
-### Request Flow
+1. User submits prompt to `generate_image` tool
+2. `ProviderSelector` analyzes prompt for:
+   - Text rendering keywords → OpenAI
+   - Portrait/product keywords → Gemini
+   - Reference images → Gemini (required)
+   - Google Search grounding → Gemini (required)
+   - 4K resolution → Gemini (required)
+3. Selected provider generates image
+4. Result returned with provider reasoning
 
-All tools follow this pattern:
-1. Pydantic validates input parameters
-2. `get_api_key()` extracts API key from parameter or environment
-3. API call via `call_responses_api()` or `make_api_request()` with retry logic
-4. Response formatted as markdown or JSON based on `output_format`
-5. Errors returned as JSON with `error` field
+### Provider Capabilities
 
-### HTTP Layer (openai_images_mcp.py:216-251)
+| Feature | OpenAI | Gemini |
+|---------|--------|--------|
+| Text Rendering | ⭐⭐⭐ Excellent | ⭐⭐ Good |
+| Photorealism | ⭐⭐ Good | ⭐⭐⭐ Excellent |
+| Speed | ~60s | ~15s |
+| Max Resolution | 1536x1024 | 4K |
+| Sizes | 1024x1024, 1024x1536, 1536x1024 | 1K, 2K, 4K |
+| Aspect Ratios | 3 | 10 |
+| Reference Images | ❌ | ✅ (up to 14) |
+| Real-time Data | ❌ | ✅ (Google Search) |
+| Thinking Mode | ❌ | ✅ |
 
-`make_api_request()` provides:
-- Exponential backoff retry for 429 rate limit errors (max 3 attempts)
-- 120s timeout for Responses API calls
-- Unified error handling for all API calls
+## MCP Tools
 
-### Image Handling
+### `generate_image`
+Main tool for image generation with auto provider selection.
 
-**Simple and Clean Approach**:
-
-The server returns a formatted text string with file information:
 ```python
-return f"""✅ **Image Generated Successfully**
+# Auto-selects OpenAI (text rendering)
+generate_image(prompt="Menu card for Italian restaurant with prices")
 
-📁 **File saved to:** `{save_path}`
-📏 **Size:** {size_kb:.1f} KB
-🔗 **Conversation ID:** `{conversation_id}`
+# Auto-selects Gemini (portrait)
+generate_image(prompt="Professional headshot with studio lighting")
 
-To view the image, open the file from your Downloads folder."""
+# Force specific provider
+generate_image(prompt="...", provider="gemini")
+
+# Use reference images (auto-selects Gemini)
+generate_image(prompt="...", reference_images=["base64..."])
 ```
 
-**Image Processing Pipeline**:
-1. **Receive base64** from OpenAI (`b64_json` field, NOT `url`)
-2. **Decode to bytes**: `img_bytes = base64.b64decode(image_b64)`
-3. **Save full PNG** to `~/Downloads/openai_image_[timestamp]_[uuid].png`
-4. **Return file path** as formatted text
+### `conversational_image`
+Multi-turn refinement with dialogue system.
 
-**Upload for Conversation** (`upload_image_file`):
-- Uploads to Files API with `purpose="assistants"`
-- Returns file_id for use in conversation messages
-- Used when user provides `input_image_path`
+### `list_providers`
+Show available providers and their capabilities.
 
 ## Key Implementation Details
 
-### Responses API Conversation Flow (openai_images_mcp.py:253-367)
+### OpenAI Provider (`src/providers/openai_provider.py`)
 
+Uses Responses API with forced tool calling:
 ```python
-1. Retrieve conversation history from conversation_store
-2. Append new user message with prompt + optional image file_id
-3. Build messages array with conversation history
-4. Define generate_image tool specification
-5. Call /chat/completions with tool_choice forcing generate_image tool
-6. Extract tool_calls from response (image generated inside tool call)
-7. Store full conversation (user message + assistant response) in conversation_store
-8. Return formatted response with conversation_id for next turn
+payload = {
+    "model": "gpt-4o",
+    "tools": [{"function": {"name": "generate_image"}}],
+    "tool_choice": {"function": {"name": "generate_image"}},
+}
+# → Extracts image from tool call → Calls /images/generations
 ```
 
-The `tool_choice` parameter (lines 329-332) ensures GPT-4 always calls the image generation tool rather than just describing what it would do.
+### Gemini Provider (`src/providers/gemini_provider.py`)
 
-### Tool Responsibilities
-
-| Tool | Purpose |
-|------|---------|
-| `openai_conversational_image` | Multi-turn refinement with context (primary tool) |
-| `openai_generate_image` | Simple wrapper that calls conversational_image |
-| `openai_list_conversations` | Browse active conversations |
-
-**Note**: `openai_generate_image` is just a convenience wrapper. It converts `GenerateImageInput` to `ConversationalImageInput` and calls `openai_conversational_image` internally (openai_images_mcp.py:538-548).
-
-## Important Constraints
-
-### GPT-Image-1 Requirements
-- Prompt length: 4000 characters maximum
-- **Sizes: ONLY 1024x1024, 1024x1536, or 1536x1024** (not 1024x1792 or 1792x1024!)
-- **No quality/style parameters** (removed in v3.0 - not supported by API)
-- Always generates exactly 1 image per call
-- Returns **base64-encoded PNG** in `b64_json` field (not URL)
-
-Critical: The tool definition sent to OpenAI (lines 297-300) must only list the 3 supported sizes, or OpenAI will choose unsupported sizes and fail.
-
-### Response Formats
-
-**For successful image generation**:
-Returns formatted markdown string with:
-- ✅ Success indicator
-- 📁 Full file path to Downloads
-- 📏 File size in KB
-- 🔗 Conversation ID for refinement
-- Instructions for viewing
-
-**For errors**:
-Returns JSON string with `{"error": "...", "success": false}`
-
-**For list operations**:
-Returns formatted markdown or JSON based on `output_format` parameter
-
-## Common Development Tasks
-
-### Adding a New Tool
-
-1. Define Pydantic input model in "Input Models" section
-2. Implement tool function with `@mcp.tool()` decorator
-3. Follow the standard pattern: validate → get_api_key → call_responses_api → format_response
-4. Add tests to `test_mcp_server.py`
-
-### Modifying Conversation Logic
-
-Conversation state is managed in `call_responses_api()` (openai_images_mcp.py:253-367). Key considerations:
-- Messages array must maintain user/assistant alternation
-- File IDs must be uploaded before referencing in messages
-- Tool choice must force `generate_image` to guarantee image generation
-- Conversation history grows unbounded (consider memory implications for long sessions)
-
-### Error Handling
-
-All API errors should be caught and returned as JSON:
+Uses official Google GenAI SDK:
 ```python
-return json.dumps({"error": "Description of error"})
+from google import genai
+from google.genai import types
+
+client = genai.Client(api_key=key)
+response = client.models.generate_content(
+    model="gemini-3-pro-image-preview",
+    contents=[*reference_images, prompt],
+    config=types.GenerateContentConfig(
+        response_modalities=["TEXT", "IMAGE"],
+        image_config=types.ImageConfig(image_size="2K"),
+    ),
+)
 ```
 
-Retry logic for rate limits is automatic via `make_api_request()`.
+### Auto-Selection Keywords
 
-## Testing Notes
+**OpenAI preferred:**
+- text, label, menu, infographic, diagram, comic, dialogue, caption, title, headline, poster, certificate, badge
 
-Test file uses direct function imports rather than MCP protocol:
-```python
-from openai_images_mcp import openai_generate_image, GenerateImageInput
-```
+**Gemini preferred:**
+- portrait, headshot, photo, photorealistic, product, studio, 4k, character consistency, weather, stock, current
 
-For full MCP protocol testing, use the MCP inspector or Claude Desktop directly.
+**Gemini required:**
+- current weather, today's, real-time, stock price, live (needs Google Search)
+- Any use of reference images
+- 4K resolution
 
-## Version 3.0 Changes
+## Environment Variables
 
-### Added Features
-- ✨ **Full-quality PNG output** - No compression, always high resolution
-- 📁 **Direct file paths** - File location returned in text response
-- 🔧 **Fixed base64 handling** - Correctly extracts `b64_json` from responses
-- 📏 **Corrected size enum** - Only the 3 actually supported sizes
-- 🧹 **Simplified codebase** - Removed ~100 lines of compression logic
-
-### Removed Features
-The following were removed to simplify the codebase:
-- **DALL-E 2/3 support**: All Direct Image API code paths
-- **`openai_edit_image` tool**: Mask-based editing
-- **`openai_create_variations` tool**: Variation generation
-- **Quality/Style parameters**: Not supported by GPT-Image-1
-- **1024x1792 and 1792x1024 sizes**: Not actually supported by API
-- **Image compression**: Removed complexity, always full quality
-
-### Key Bug Fixes
-1. **Tool definition size enum**: Fixed to list only supported sizes
-2. **Base64 extraction**: Changed from looking for `url` to `b64_json`
-3. **Return format**: Simple text string with file path (no MCP content list complexity)
-
-## Dependencies
-
-Core dependencies (requirements.txt):
-- `mcp>=1.16.0`: MCP SDK for protocol implementation
-- `fastmcp>=2.12.5`: FastMCP framework
-- `pydantic>=2.12.3`: Input validation with Field descriptions
-- `httpx>=0.24.0`: Async HTTP client for OpenAI API
-
-**Note**: Pillow removed in v3.0 (no longer compressing images)
-
-## Configuration
-
-API key sources (in priority order):
-1. `api_key` parameter in tool call
-2. `OPENAI_API_KEY` environment variable
-
-The server will error if no API key is found.
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `OPENAI_API_KEY` | OpenAI API key | One of these |
+| `GEMINI_API_KEY` | Google Gemini API key | required |
+| `DEFAULT_PROVIDER` | Default: "auto" | No |
+| `DEFAULT_OPENAI_SIZE` | Default: "1024x1024" | No |
+| `DEFAULT_GEMINI_SIZE` | Default: "2K" | No |
+| `ENABLE_GOOGLE_SEARCH` | Default: "false" | No |
 
 ## Troubleshooting
 
-Common issues:
+### "No providers available"
+Set at least one API key: `OPENAI_API_KEY` or `GEMINI_API_KEY`
 
-### "Invalid value: '1024x1792'"
-- **Root cause**: Tool definition lists unsupported size
-- **Fix**: Ensure enum only has: 1024x1024, 1024x1536, 1536x1024
-- OpenAI will choose from listed sizes, so listing unsupported ones causes errors
-
-### File Not Found in Downloads
-- Check the full path returned in the response
-- Verify Downloads folder exists: `ls ~/Downloads/`
-- Check logs for actual save location
-
-### Other Issues
-- **"spawn python ENOENT"**: Use `python3` in config
-- **Wrong path**: Use absolute path to `openai_images_mcp.py`
-- **API key not found**: Set in config file's `env` section
-- **Conversation not found**: Use `openai_list_conversations` tool
-
-**Log locations**:
-- macOS: `~/Library/Logs/Claude/mcp-server-openai-images.log`
-- Windows: Check Claude logs directory
-
-**Success indicators in logs**:
+### "Gemini provider requires google-genai"
+```bash
+pip install google-genai pillow
 ```
-✓ "Image saved to: /Users/.../Downloads/openai_image_... (XXX.X KB)"
-✓ "Conversation ID: conv_..."
+
+### Wrong provider selected
+Use explicit `provider` parameter to override auto-selection.
+
+### Image not saved
+Check ~/Downloads/images/ directory exists and is writable.
+
+## Dependencies
+
 ```
+mcp>=1.16.0           # MCP protocol
+fastmcp>=2.12.5       # FastMCP framework
+pydantic>=2.12.3      # Input validation
+httpx>=0.24.0         # OpenAI HTTP client
+google-genai>=1.52.0  # Gemini SDK
+pillow>=10.4.0        # Image processing
+```
+
+## Version History
+
+### v4.0.0 (Current)
+- Multi-provider support (OpenAI + Gemini)
+- Auto provider selection
+- Gemini Nano Banana Pro with full features
+- Restructured as `src/` package
+
+### v3.0.0
+- OpenAI GPT-Image-1 only
+- Phase 1 dialogue system
+- Simplified architecture

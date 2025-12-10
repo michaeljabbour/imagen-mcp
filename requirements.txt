@@ -1,4 +1,4 @@
-# OpenAI Images MCP Server Requirements
+# imagen-mcp: Multi-Provider Image Generation Server
 # Install with: pip install -r requirements.txt
 
 # MCP SDK for Python
@@ -10,10 +10,14 @@ fastmcp>=2.12.5
 # Data validation
 pydantic>=2.12.3
 
-# Async HTTP client
+# Async HTTP client (for OpenAI provider)
 httpx>=0.24.0
 
-# Note: Pillow not required - removed compression feature
+# Google Gemini SDK (for Gemini/Nano Banana Pro provider)
+google-genai>=1.52.0
+
+# Image processing (required for Gemini reference images)
+pillow>=10.4.0
 
 # Optional: For development and testing
 pytest>=7.0.0
