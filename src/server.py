@@ -12,21 +12,18 @@ or allows explicit provider selection.
 
 import json
 import logging
-from datetime import datetime
-from pathlib import Path
-from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
 from .config.settings import get_settings
 from .models.input_models import (
-    ImageGenerationInput,
     ConversationalImageInput,
+    ImageGenerationInput,
     ListConversationsInput,
-    Provider,
     OutputFormat,
+    Provider,
 )
-from .providers import get_provider_registry, ProviderRecommendation
+from .providers import ImageResult, ProviderRecommendation, get_provider_registry
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -41,8 +38,8 @@ mcp = FastMCP("imagen_mcp")
 
 
 def format_result_markdown(
-    result,
-    recommendation: Optional[ProviderRecommendation] = None,
+    result: ImageResult,
+    recommendation: ProviderRecommendation | None = None,
 ) -> str:
     """Format image generation result as markdown."""
     if not result.success:
@@ -55,27 +52,33 @@ def format_result_markdown(
 
     # Provider info
     if recommendation:
-        lines.extend([
-            f"**Provider:** {result.provider.title()} (auto-selected)",
-            f"**Reasoning:** {recommendation.reasoning}",
-            "",
-        ])
+        lines.extend(
+            [
+                f"**Provider:** {result.provider.title()} (auto-selected)",
+                f"**Reasoning:** {recommendation.reasoning}",
+                "",
+            ]
+        )
     else:
         lines.append(f"**Provider:** {result.provider.title()}")
         lines.append("")
 
     # Image info
     if result.image_path:
-        lines.extend([
-            f"📁 **Saved to:** `{result.image_path}`",
-            "",
-        ])
+        lines.extend(
+            [
+                f"📁 **Saved to:** `{result.image_path}`",
+                "",
+            ]
+        )
 
     # Metadata
-    lines.extend([
-        f"**Model:** {result.model}",
-        f"**Size:** {result.size or 'default'}",
-    ])
+    lines.extend(
+        [
+            f"**Model:** {result.model}",
+            f"**Size:** {result.size or 'default'}",
+        ]
+    )
 
     if result.aspect_ratio:
         lines.append(f"**Aspect Ratio:** {result.aspect_ratio}")
@@ -85,33 +88,41 @@ def format_result_markdown(
 
     # Conversation ID for refinement
     if result.conversation_id:
-        lines.extend([
-            "",
-            "## 🔄 Continue Refining",
-            f"**Conversation ID:** `{result.conversation_id}`",
-            "*Use this ID to refine this image further.*",
-        ])
+        lines.extend(
+            [
+                "",
+                "## 🔄 Continue Refining",
+                f"**Conversation ID:** `{result.conversation_id}`",
+                "*Use this ID to refine this image further.*",
+            ]
+        )
 
     # Gemini-specific: thinking mode
     if result.thoughts:
-        lines.extend([
-            "",
-            "## 💭 Model Reasoning",
-            f"*{len(result.thoughts)} thought steps processed*",
-        ])
+        lines.extend(
+            [
+                "",
+                "## 💭 Model Reasoning",
+                f"*{len(result.thoughts)} thought steps processed*",
+            ]
+        )
 
     # Gemini-specific: grounding
     if result.grounding_metadata:
-        lines.extend([
-            "",
-            "## 🔍 Real-time Data Sources",
-            "*Used Google Search for current information*",
-        ])
+        lines.extend(
+            [
+                "",
+                "## 🔍 Real-time Data Sources",
+                "*Used Google Search for current information*",
+            ]
+        )
 
     return "\n".join(lines)
 
 
-def format_result_json(result, recommendation: Optional[ProviderRecommendation] = None) -> str:
+def format_result_json(
+    result: ImageResult, recommendation: ProviderRecommendation | None = None
+) -> str:
     """Format image generation result as JSON."""
     data = result.to_dict()
     if recommendation:
@@ -130,7 +141,7 @@ def format_result_json(result, recommendation: Optional[ProviderRecommendation] 
 
 
 @mcp.tool(name="generate_image")
-async def generate_image(params: ImageGenerationInput):
+async def generate_image(params: ImageGenerationInput) -> str:
     """Generate an image using the best available provider.
 
     **Automatic Provider Selection:**
@@ -194,7 +205,9 @@ async def generate_image(params: ImageGenerationInput):
             reference_images=params.reference_images,
             enable_enhancement=params.enhance_prompt if params.enhance_prompt is not None else True,
             enable_google_search=params.enable_google_search or False,
-            api_key=params.openai_api_key if recommendation.provider == "openai" else params.gemini_api_key,
+            api_key=params.openai_api_key
+            if recommendation.provider == "openai"
+            else params.gemini_api_key,
             model=params.gemini_model if recommendation.provider == "gemini" else None,
         )
 
@@ -217,7 +230,7 @@ async def generate_image(params: ImageGenerationInput):
 
 
 @mcp.tool(name="conversational_image")
-async def conversational_image(params: ConversationalImageInput):
+async def conversational_image(params: ConversationalImageInput) -> str:
     """Generate images conversationally with iterative refinement.
 
     **USE THIS TOOL when:**
@@ -275,7 +288,9 @@ async def conversational_image(params: ConversationalImageInput):
             reference_images=params.reference_images,
             enable_enhancement=not params.skip_dialogue,
             enable_google_search=params.enable_google_search or False,
-            api_key=params.openai_api_key if recommendation.provider == "openai" else params.gemini_api_key,
+            api_key=params.openai_api_key
+            if recommendation.provider == "openai"
+            else params.gemini_api_key,
             model=params.gemini_model if recommendation.provider == "gemini" else None,
         )
 
@@ -290,7 +305,7 @@ async def conversational_image(params: ConversationalImageInput):
 
 
 @mcp.tool(name="list_providers")
-async def list_providers():
+async def list_providers() -> str:
     """List available image generation providers and their capabilities.
 
     Returns a comparison of available providers including:
@@ -305,7 +320,7 @@ async def list_providers():
 
 
 @mcp.tool(name="list_conversations")
-async def list_conversations(params: ListConversationsInput):
+async def list_conversations(params: ListConversationsInput) -> str:
     """List saved image generation conversations.
 
     Returns recent conversations that can be continued for refinement.
@@ -317,12 +332,47 @@ async def list_conversations(params: ListConversationsInput):
     Returns:
         List of conversations with metadata.
     """
-    # TODO: Implement conversation listing from storage
-    return "## 📝 Conversations\n\n*Conversation listing coming soon.*"
+    try:
+        registry = get_provider_registry()
+
+        # Ensure providers are initialized to get their conversations
+        # If we filter by provider, only initialize that one
+        if params.provider:
+            if registry.is_provider_available(params.provider):
+                registry.get_provider(params.provider)
+        else:
+            # Initialize all available
+            for p in registry.list_providers():
+                try:
+                    registry.get_provider(p)
+                except Exception:
+                    pass
+
+        conversations = registry.list_conversations(
+            limit=params.limit or 10,
+            provider_filter=params.provider
+        )
+
+        if not conversations:
+            return "## 📝 Conversations\n\n*No active conversations found.*"
+
+        lines = ["## 📝 Conversations", ""]
+
+        for conv in conversations:
+            lines.append(f"### `{conv['id']}` ({conv['provider']})")
+            lines.append(f"- **Messages:** {conv['message_count']}")
+            lines.append(f"- **Last:** {conv['last_message']}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.error(f"Failed to list conversations: {e}")
+        return f"## ❌ Error\n\nFailed to list conversations: {str(e)}"
 
 
 @mcp.tool(name="list_gemini_models")
-async def list_gemini_models():
+async def list_gemini_models() -> str:
     """List available Gemini models that support image generation.
 
     Queries the Gemini API to show which models are available for image
@@ -337,7 +387,9 @@ async def list_gemini_models():
     settings = get_settings()
 
     if not settings.has_gemini_key():
-        return "## ❌ No Gemini API Key\n\nSet GEMINI_API_KEY or GOOGLE_API_KEY environment variable."
+        return (
+            "## ❌ No Gemini API Key\n\nSet GEMINI_API_KEY or GOOGLE_API_KEY environment variable."
+        )
 
     api_key = settings.gemini_api_key
     api_base = "https://generativelanguage.googleapis.com/v1beta"
@@ -355,14 +407,19 @@ async def list_gemini_models():
 
             # Check if model might support images
             if any(x in name.lower() for x in ["image", "imagen", "flash-exp", "nano-banana"]):
-                image_models.append({
-                    "name": name.replace("models/", ""),
-                    "methods": methods,
-                    "description": model.get("description", "")[:100],
-                })
+                image_models.append(
+                    {
+                        "name": name.replace("models/", ""),
+                        "methods": methods,
+                        "description": model.get("description", "")[:100],
+                    }
+                )
 
         if not image_models:
-            return "## No Image Models Found\n\nNo image generation models available with current API key."
+            return (
+                "## No Image Models Found\n\n"
+                "No image generation models available with current API key."
+            )
 
         lines = ["## Available Gemini Image Models\n"]
         for m in image_models:
@@ -384,7 +441,7 @@ async def list_gemini_models():
 # ============================
 
 
-def create_app():
+def create_app() -> FastMCP:
     """Create the MCP server application."""
     return mcp
 

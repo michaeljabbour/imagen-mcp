@@ -1,6 +1,7 @@
 """Tests for provider implementations."""
 
 import os
+
 import pytest
 
 # Set dummy API keys for testing
@@ -8,8 +9,8 @@ os.environ.setdefault("OPENAI_API_KEY", "test-key")
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
 
 from src.providers.base import ProviderCapabilities
-from src.providers.openai_provider import OpenAIProvider
 from src.providers.gemini_provider import GeminiProvider
+from src.providers.openai_provider import OpenAIProvider
 from src.providers.registry import ProviderRegistry
 
 

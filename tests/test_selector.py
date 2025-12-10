@@ -1,6 +1,7 @@
 """Tests for provider selection logic."""
 
 import os
+
 import pytest
 
 # Set dummy API keys for testing
@@ -45,10 +46,7 @@ class TestProviderSelection:
 
     def test_reference_images_require_gemini(self, selector):
         """Reference images should force Gemini."""
-        rec = selector.suggest_provider(
-            "A simple cat",
-            reference_images=["base64encodedimage"]
-        )
+        rec = selector.suggest_provider("A simple cat", reference_images=["base64encodedimage"])
         assert rec.provider == "gemini"
         assert rec.confidence == 1.0
 
@@ -60,20 +58,14 @@ class TestProviderSelection:
 
     def test_google_search_requires_gemini(self, selector):
         """Google Search grounding should force Gemini."""
-        rec = selector.suggest_provider(
-            "Show me the weather",
-            enable_google_search=True
-        )
+        rec = selector.suggest_provider("Show me the weather", enable_google_search=True)
         assert rec.provider == "gemini"
         assert rec.confidence == 1.0
 
     def test_explicit_provider_override(self, selector):
         """Explicit provider should override auto-selection."""
         # Force OpenAI even for portrait
-        rec = selector.suggest_provider(
-            "Professional headshot",
-            explicit_provider="openai"
-        )
+        rec = selector.suggest_provider("Professional headshot", explicit_provider="openai")
         assert rec.provider == "openai"
         assert rec.confidence == 1.0
 

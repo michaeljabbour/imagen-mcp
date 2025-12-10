@@ -51,23 +51,23 @@ DEFAULT_GEMINI_IMAGE_MODEL = "gemini-3-pro-image-preview"
 
 # Gemini supports 10 aspect ratios
 GEMINI_ASPECT_RATIOS = [
-    "1:1",    # Square
-    "2:3",    # Portrait (phone)
-    "3:2",    # Landscape (photo)
-    "3:4",    # Portrait (social)
-    "4:3",    # Landscape (classic)
-    "4:5",    # Portrait (Instagram)
-    "5:4",    # Landscape (social)
-    "9:16",   # Portrait (Stories/Reels)
-    "16:9",   # Landscape (video)
-    "21:9",   # Ultra-wide
+    "1:1",  # Square
+    "2:3",  # Portrait (phone)
+    "3:2",  # Landscape (photo)
+    "3:4",  # Portrait (social)
+    "4:3",  # Landscape (classic)
+    "4:5",  # Portrait (Instagram)
+    "5:4",  # Landscape (social)
+    "9:16",  # Portrait (Stories/Reels)
+    "16:9",  # Landscape (video)
+    "21:9",  # Ultra-wide
 ]
 
 # Gemini resolution options (use uppercase K)
 GEMINI_SIZES = [
-    "1K",   # Fast generation
-    "2K",   # High quality (default)
-    "4K",   # Maximum resolution
+    "1K",  # Fast generation
+    "2K",  # High quality (default)
+    "4K",  # Maximum resolution
 ]
 
 # Reference image limits

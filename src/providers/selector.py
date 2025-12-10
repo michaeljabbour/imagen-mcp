@@ -7,12 +7,11 @@ for each image generation task.
 
 import logging
 import re
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 from ..config.constants import (
-    GEMINI_REQUIRED_KEYWORDS,
     GEMINI_PREFERRED_KEYWORDS,
+    GEMINI_REQUIRED_KEYWORDS,
     OPENAI_PREFERRED_KEYWORDS,
 )
 from ..config.settings import get_settings
@@ -27,15 +26,15 @@ class ProviderRecommendation:
     provider: str  # "openai" or "gemini"
     confidence: float  # 0.0 to 1.0
     reasoning: str
-    alternative: Optional[str] = None
-    alternative_reasoning: Optional[str] = None
+    alternative: str | None = None
+    alternative_reasoning: str | None = None
 
     # Feature requirements that drove the decision
     requires_text_rendering: bool = False
     requires_reference_images: bool = False
     requires_real_time_data: bool = False
     requires_high_resolution: bool = False
-    detected_image_type: Optional[str] = None
+    detected_image_type: str | None = None
 
 
 class ProviderSelector:
@@ -51,7 +50,7 @@ class ProviderSelector:
     - Reference image requirements
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the provider selector."""
         self.settings = get_settings()
 
@@ -59,10 +58,10 @@ class ProviderSelector:
         self,
         prompt: str,
         *,
-        size: Optional[str] = None,
-        reference_images: Optional[list[str]] = None,
+        size: str | None = None,
+        reference_images: list[str] | None = None,
         enable_google_search: bool = False,
-        explicit_provider: Optional[str] = None,
+        explicit_provider: str | None = None,
     ) -> ProviderRecommendation:
         """
         Analyze prompt and requirements to suggest the best provider.
@@ -82,9 +81,7 @@ class ProviderSelector:
         # Check available providers
         available = self.settings.available_providers()
         if not available:
-            raise ValueError(
-                "No providers available. Set OPENAI_API_KEY or GEMINI_API_KEY."
-            )
+            raise ValueError("No providers available. Set OPENAI_API_KEY or GEMINI_API_KEY.")
 
         # Handle explicit provider request
         if explicit_provider:
@@ -165,10 +162,10 @@ class ProviderSelector:
     def _check_hard_requirements(
         self,
         prompt_lower: str,
-        reference_images: Optional[list[str]],
+        reference_images: list[str] | None,
         enable_google_search: bool,
-        size: Optional[str],
-    ) -> tuple[Optional[str], str]:
+        size: str | None,
+    ) -> tuple[str | None, str]:
         """Check for requirements that force a specific provider."""
         # Reference images require Gemini
         if reference_images and len(reference_images) > 0:
@@ -196,8 +193,16 @@ class ProviderSelector:
 
         # Check for text rendering keywords
         text_keywords = [
-            "text", "label", "title", "headline", "caption",
-            "menu", "sign", "banner", "poster", "certificate",
+            "text",
+            "label",
+            "title",
+            "headline",
+            "caption",
+            "menu",
+            "sign",
+            "banner",
+            "poster",
+            "certificate",
         ]
         text_count = sum(1 for k in text_keywords if k in prompt_lower)
         if text_count > 0:
@@ -257,7 +262,7 @@ class ProviderSelector:
 
         return score, reasons
 
-    def _detect_image_type(self, prompt_lower: str) -> Optional[str]:
+    def _detect_image_type(self, prompt_lower: str) -> str | None:
         """Detect the type of image being requested."""
         type_patterns = {
             "portrait": r"\b(portrait|headshot|face|person|selfie)\b",
@@ -281,13 +286,25 @@ class ProviderSelector:
     def _needs_text_rendering(self, prompt_lower: str) -> bool:
         """Check if prompt requires text rendering."""
         text_indicators = [
-            "text", "label", "caption", "title", "headline",
-            "sign", "banner", "poster", "menu", "certificate",
-            "quote", "saying", "words", "write", "spell",
+            "text",
+            "label",
+            "caption",
+            "title",
+            "headline",
+            "sign",
+            "banner",
+            "poster",
+            "menu",
+            "certificate",
+            "quote",
+            "saying",
+            "words",
+            "write",
+            "spell",
         ]
         return any(indicator in prompt_lower for indicator in text_indicators)
 
-    def _needs_high_resolution(self, size: Optional[str]) -> bool:
+    def _needs_high_resolution(self, size: str | None) -> bool:
         """Check if high resolution is needed."""
         if not size:
             return False
@@ -302,7 +319,8 @@ class ProviderSelector:
             "",
             "| Feature | OpenAI GPT-Image-1 | Gemini Nano Banana Pro |",
             "|---------|-------------------|------------------------|",
-            f"| Available | {'✅' if 'openai' in available else '❌'} | {'✅' if 'gemini' in available else '❌'} |",
+            f"| Available | {'✅' if 'openai' in available else '❌'} | "
+            f"{'✅' if 'gemini' in available else '❌'} |",
             "| Text Rendering | ⭐⭐⭐ Excellent | ⭐⭐ Good |",
             "| Photorealism | ⭐⭐ Good | ⭐⭐⭐ Excellent |",
             "| Speed | ~60s | ~15s |",

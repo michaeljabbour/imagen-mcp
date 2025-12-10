@@ -1,7 +1,6 @@
 """Tests for MCP server."""
 
 import os
-import pytest
 
 # Set dummy API keys for testing
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
@@ -14,12 +13,13 @@ class TestServerImports:
     def test_server_imports(self):
         """Server module should import without errors."""
         from src.server import mcp
+
         assert mcp is not None
 
     def test_config_imports(self):
         """Config modules should import without errors."""
-        from src.config.constants import OPENAI_SIZES, GEMINI_SIZES
-        from src.config.settings import Settings, get_settings
+        from src.config.constants import GEMINI_SIZES, OPENAI_SIZES
+        from src.config.settings import get_settings
 
         assert len(OPENAI_SIZES) == 3
         assert len(GEMINI_SIZES) == 3
@@ -30,8 +30,6 @@ class TestServerImports:
         from src.providers import (
             ImageProvider,
             ImageResult,
-            ProviderCapabilities,
-            ProviderRegistry,
             get_provider_registry,
         )
 
@@ -41,7 +39,7 @@ class TestServerImports:
 
     def test_model_imports(self):
         """Model modules should import without errors."""
-        from src.models import ImageGenerationInput, ConversationalImageInput
+        from src.models import ConversationalImageInput, ImageGenerationInput
 
         assert ImageGenerationInput is not None
         assert ConversationalImageInput is not None
@@ -95,11 +93,7 @@ class TestInputModels:
         """ImageGenerationInput should accept provider."""
         from src.models import ImageGenerationInput
 
-        input_data = ImageGenerationInput(
-            prompt="A sunset",
-            provider="gemini",
-            size="4K"
-        )
+        input_data = ImageGenerationInput(prompt="A sunset", provider="gemini", size="4K")
         assert input_data.provider == "gemini"
         assert input_data.size == "4K"
 
@@ -108,8 +102,7 @@ class TestInputModels:
         from src.models import ConversationalImageInput
 
         input_data = ConversationalImageInput(
-            prompt="Make it more colorful",
-            conversation_id="test-123"
+            prompt="Make it more colorful", conversation_id="test-123"
         )
         assert input_data.prompt == "Make it more colorful"
         assert input_data.conversation_id == "test-123"

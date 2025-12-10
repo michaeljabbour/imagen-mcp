@@ -7,7 +7,6 @@ Handles API keys and configuration from environment variables.
 import os
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Optional
 
 
 @dataclass
@@ -15,8 +14,8 @@ class Settings:
     """Application settings loaded from environment."""
 
     # API Keys
-    openai_api_key: Optional[str] = None
-    gemini_api_key: Optional[str] = None  # Also checks GOOGLE_API_KEY
+    openai_api_key: str | None = None
+    gemini_api_key: str | None = None  # Also checks GOOGLE_API_KEY
 
     # Defaults
     default_provider: str = "auto"  # auto, openai, gemini
@@ -32,7 +31,7 @@ class Settings:
     request_timeout: int = 120
 
     # Output
-    output_dir: Optional[str] = None
+    output_dir: str | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -47,13 +46,14 @@ class Settings:
             default_openai_size=os.getenv("DEFAULT_OPENAI_SIZE", "1024x1024"),
             default_gemini_size=os.getenv("DEFAULT_GEMINI_SIZE", "2K"),
             default_gemini_aspect_ratio=os.getenv("DEFAULT_GEMINI_ASPECT_RATIO", "1:1"),
-            enable_prompt_enhancement=os.getenv("ENABLE_PROMPT_ENHANCEMENT", "true").lower() == "true",
+            enable_prompt_enhancement=os.getenv("ENABLE_PROMPT_ENHANCEMENT", "true").lower()
+            == "true",
             enable_google_search=os.getenv("ENABLE_GOOGLE_SEARCH", "false").lower() == "true",
             request_timeout=int(os.getenv("REQUEST_TIMEOUT", "120")),
             output_dir=os.getenv("OUTPUT_DIR"),
         )
 
-    def get_openai_api_key(self, provided_key: Optional[str] = None) -> str:
+    def get_openai_api_key(self, provided_key: str | None = None) -> str:
         """Get OpenAI API key from provided value or settings."""
         api_key = provided_key or self.openai_api_key
         if not api_key:
@@ -63,7 +63,7 @@ class Settings:
             )
         return api_key
 
-    def get_gemini_api_key(self, provided_key: Optional[str] = None) -> str:
+    def get_gemini_api_key(self, provided_key: str | None = None) -> str:
         """Get Gemini API key from provided value or settings."""
         api_key = provided_key or self.gemini_api_key
         if not api_key:

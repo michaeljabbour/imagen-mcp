@@ -2,7 +2,7 @@
 
 from .base import ImageProvider, ImageResult, ProviderCapabilities
 from .registry import ProviderRegistry, get_provider_registry
-from .selector import ProviderSelector, ProviderRecommendation
+from .selector import ProviderRecommendation, ProviderSelector
 
 __all__ = [
     "ImageProvider",

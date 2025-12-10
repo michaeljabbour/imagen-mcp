@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
@@ -53,31 +53,31 @@ class ImageResult:
     model: str
 
     # Image data (one of these will be set)
-    image_path: Optional[Path] = None
-    image_base64: Optional[str] = None
-    image_url: Optional[str] = None
+    image_path: Path | None = None
+    image_base64: str | None = None
+    image_url: str | None = None
 
     # Metadata
     prompt: str = ""
-    enhanced_prompt: Optional[str] = None
-    size: Optional[str] = None
-    aspect_ratio: Optional[str] = None
+    enhanced_prompt: str | None = None
+    size: str | None = None
+    aspect_ratio: str | None = None
 
     # Conversation tracking
-    conversation_id: Optional[str] = None
-    file_id: Optional[str] = None  # Provider-specific file reference
+    conversation_id: str | None = None
+    file_id: str | None = None  # Provider-specific file reference
 
     # Timestamps
     timestamp: datetime = field(default_factory=datetime.now)
-    generation_time_seconds: Optional[float] = None
+    generation_time_seconds: float | None = None
 
     # Additional data
-    thoughts: Optional[list[dict[str, Any]]] = None  # Gemini thinking mode
-    grounding_metadata: Optional[dict[str, Any]] = None  # Gemini search grounding
-    verification_result: Optional[dict[str, Any]] = None
+    thoughts: list[dict[str, Any]] | None = None  # Gemini thinking mode
+    grounding_metadata: dict[str, Any] | None = None  # Gemini search grounding
+    verification_result: dict[str, Any] | None = None
 
     # Error info
-    error: Optional[str] = None
+    error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -132,10 +132,10 @@ class ImageProvider(ABC):
         self,
         prompt: str,
         *,
-        size: Optional[str] = None,
-        aspect_ratio: Optional[str] = None,
-        conversation_id: Optional[str] = None,
-        reference_images: Optional[list[str]] = None,
+        size: str | None = None,
+        aspect_ratio: str | None = None,
+        conversation_id: str | None = None,
+        reference_images: list[str] | None = None,
         enable_enhancement: bool = True,
         **kwargs: Any,
     ) -> ImageResult:
@@ -160,8 +160,8 @@ class ImageProvider(ABC):
     async def validate_params(
         self,
         prompt: str,
-        size: Optional[str] = None,
-        aspect_ratio: Optional[str] = None,
+        size: str | None = None,
+        aspect_ratio: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """
@@ -234,6 +234,18 @@ class ImageProvider(ABC):
         }
         return feature_map.get(feature, False)
 
-    async def close(self) -> None:
+    async def close(self) -> None:  # noqa: B027
         """Clean up provider resources."""
-        pass
+        pass  # Default implementation does nothing
+
+    def get_conversations(self, limit: int = 10) -> list[dict[str, Any]]:
+        """
+        Get list of recent conversations.
+
+        Args:
+            limit: Maximum number of conversations to return
+
+        Returns:
+            List of conversation summaries
+        """
+        return []

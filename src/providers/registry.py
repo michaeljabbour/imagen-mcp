@@ -6,14 +6,15 @@ for creating and accessing providers.
 """
 
 import logging
+from datetime import datetime
 from functools import lru_cache
-from typing import Optional
+from typing import Any
 
 from ..config.settings import get_settings
 from .base import ImageProvider
-from .openai_provider import OpenAIProvider
 from .gemini_provider import GeminiProvider
-from .selector import ProviderSelector, ProviderRecommendation
+from .openai_provider import OpenAIProvider
+from .selector import ProviderRecommendation, ProviderSelector
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ class ProviderRegistry:
     - Listing available providers
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the provider registry."""
         self._providers: dict[str, ImageProvider] = {}
         self._selector = ProviderSelector()
@@ -59,7 +60,7 @@ class ProviderRegistry:
                 raise ValueError(
                     "OpenAI provider not available. Set OPENAI_API_KEY environment variable."
                 )
-            provider = OpenAIProvider()
+            provider: ImageProvider = OpenAIProvider()
         elif name == "gemini":
             if not self._settings.has_gemini_key():
                 raise ValueError(
@@ -76,10 +77,10 @@ class ProviderRegistry:
         self,
         prompt: str,
         *,
-        size: Optional[str] = None,
-        reference_images: Optional[list[str]] = None,
+        size: str | None = None,
+        reference_images: list[str] | None = None,
         enable_google_search: bool = False,
-        explicit_provider: Optional[str] = None,
+        explicit_provider: str | None = None,
     ) -> tuple[ImageProvider, ProviderRecommendation]:
         """
         Get the best provider for a given prompt.
@@ -163,6 +164,45 @@ class ProviderRegistry:
         for provider in self._providers.values():
             await provider.close()
         self._providers.clear()
+
+    def list_conversations(
+        self, limit: int = 10, provider_filter: str | None = None
+    ) -> list[dict[str, Any]]:
+        """
+        List conversations from all initialized providers.
+
+        Args:
+            limit: Max conversations to return total
+            provider_filter: Optional provider name to filter by
+
+        Returns:
+            Combined list of conversations
+        """
+        all_conversations = []
+
+        # Determine which providers to query
+        providers_to_check = []
+        if provider_filter:
+            if provider_filter in self._providers:
+                providers_to_check.append(self._providers[provider_filter])
+        else:
+            providers_to_check = list(self._providers.values())
+
+        # Collect conversations
+        for provider in providers_to_check:
+            try:
+                # We request 'limit' from each to ensure we have enough to sort
+                all_conversations.extend(provider.get_conversations(limit))
+            except Exception as e:
+                logger.warning(f"Failed to list conversations for {provider.name}: {e}")
+
+        # Sort by updated time (if available) or ID
+        all_conversations.sort(
+            key=lambda x: (x.get("updated", datetime.min), x.get("id", "")),
+            reverse=True,
+        )
+
+        return all_conversations[:limit]
 
 
 @lru_cache(maxsize=1)

@@ -12,16 +12,16 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from uuid import uuid4
 
 import httpx
 
 from ..config.constants import (
-    OPENAI_API_BASE_URL,
-    OPENAI_SIZES,
     MAX_PROMPT_LENGTH,
     MAX_RETRIES,
+    OPENAI_API_BASE_URL,
+    OPENAI_SIZES,
 )
 from ..config.settings import get_settings
 from .base import ImageProvider, ImageResult, ProviderCapabilities
@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 
 def get_downloads_directory() -> Path:
     """Get the appropriate downloads directory for images."""
-    import platform
 
     downloads_base = Path.home() / "Downloads"
     images_dir = downloads_base / "images"
@@ -56,7 +55,7 @@ class OpenAIProvider(ImageProvider):
     - Slower generation (~60s)
     """
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None):
         """Initialize OpenAI provider."""
         self._api_key = api_key
         self._conversation_store: dict[str, list[dict[str, Any]]] = {}
@@ -102,7 +101,7 @@ class OpenAIProvider(ImageProvider):
             ],
         )
 
-    def _get_api_key(self, provided_key: Optional[str] = None) -> str:
+    def _get_api_key(self, provided_key: str | None = None) -> str:
         """Get API key from provided value, instance, or settings."""
         api_key = provided_key or self._api_key
         if not api_key:
@@ -118,7 +117,7 @@ class OpenAIProvider(ImageProvider):
         self,
         endpoint: str,
         api_key: str,
-        json_data: Optional[dict[str, Any]] = None,
+        json_data: dict[str, Any] | None = None,
         method: str = "POST",
     ) -> dict[str, Any]:
         """Make an API request to OpenAI with retry logic."""
@@ -134,10 +133,12 @@ class OpenAIProvider(ImageProvider):
                     if method == "POST":
                         response = await client.post(url, headers=headers, json=json_data)
                     else:
-                        response = await client.request(method, url, headers=headers, json=json_data)
+                        response = await client.request(
+                            method, url, headers=headers, json=json_data
+                        )
 
                     response.raise_for_status()
-                    return response.json()
+                    return dict(response.json())
 
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code == 429:  # Rate limit
@@ -145,12 +146,14 @@ class OpenAIProvider(ImageProvider):
                             await asyncio.sleep(2**attempt)
                             continue
                     error_detail = e.response.text
-                    raise ValueError(f"OpenAI API error ({e.response.status_code}): {error_detail}")
+                    raise ValueError(
+                        f"OpenAI API error ({e.response.status_code}): {error_detail}"
+                    ) from e
                 except Exception as e:
                     if attempt < MAX_RETRIES - 1:
                         await asyncio.sleep(1)
                         continue
-                    raise ValueError(f"API request failed: {str(e)}")
+                    raise ValueError(f"API request failed: {str(e)}") from e
 
         raise ValueError("API request failed after all retries")
 
@@ -160,7 +163,7 @@ class OpenAIProvider(ImageProvider):
         api_key: str,
         conversation_id: str,
         assistant_model: str = "gpt-4o",
-        input_image_file_id: Optional[str] = None,
+        input_image_file_id: str | None = None,
         size: str = "1024x1024",
     ) -> dict[str, Any]:
         """Call OpenAI Responses API for conversational image generation."""
@@ -175,16 +178,20 @@ class OpenAIProvider(ImageProvider):
 
         # Add image input if provided
         if input_image_file_id:
-            current_message["content"].append({
-                "type": "image_file",
-                "image_file": {"file_id": input_image_file_id},
-            })
+            current_message["content"].append(
+                {
+                    "type": "image_file",
+                    "image_file": {"file_id": input_image_file_id},
+                }
+            )
 
         # Add text prompt
-        current_message["content"].append({
-            "type": "text",
-            "text": prompt,
-        })
+        current_message["content"].append(
+            {
+                "type": "text",
+                "text": prompt,
+            }
+        )
 
         messages.append(current_message)
 
@@ -192,33 +199,35 @@ class OpenAIProvider(ImageProvider):
         payload = {
             "model": assistant_model,
             "messages": messages,
-            "tools": [{
-                "type": "function",
-                "function": {
-                    "name": "generate_image",
-                    "description": "Generate an image based on a text prompt using gpt-image-1",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "model": {
-                                "type": "string",
-                                "enum": ["gpt-image-1"],
-                                "default": "gpt-image-1",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "generate_image",
+                        "description": "Generate an image based on a text prompt using gpt-image-1",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "model": {
+                                    "type": "string",
+                                    "enum": ["gpt-image-1"],
+                                    "default": "gpt-image-1",
+                                },
+                                "prompt": {
+                                    "type": "string",
+                                    "description": "The prompt for image generation",
+                                },
+                                "size": {
+                                    "type": "string",
+                                    "enum": OPENAI_SIZES,
+                                    "default": "1024x1024",
+                                },
                             },
-                            "prompt": {
-                                "type": "string",
-                                "description": "The prompt for image generation",
-                            },
-                            "size": {
-                                "type": "string",
-                                "enum": OPENAI_SIZES,
-                                "default": "1024x1024",
-                            },
+                            "required": ["prompt"],
                         },
-                        "required": ["prompt"],
                     },
-                },
-            }],
+                }
+            ],
             "tool_choice": {
                 "type": "function",
                 "function": {"name": "generate_image"},
@@ -251,9 +260,11 @@ class OpenAIProvider(ImageProvider):
                 if "tool_calls" in assistant_message:
                     for tool_call in assistant_message["tool_calls"]:
                         if tool_call["function"]["name"] == "generate_image":
-                            tool_args = json.loads(tool_call["function"]["arguments"]) if isinstance(
-                                tool_call["function"].get("arguments"), str
-                            ) else tool_call["function"].get("arguments", {})
+                            tool_args = (
+                                json.loads(tool_call["function"]["arguments"])
+                                if isinstance(tool_call["function"].get("arguments"), str)
+                                else tool_call["function"].get("arguments", {})
+                            )
 
                             logger.info(f"Tool call arguments: {tool_args}")
 
@@ -297,8 +308,8 @@ class OpenAIProvider(ImageProvider):
     async def validate_params(
         self,
         prompt: str,
-        size: Optional[str] = None,
-        aspect_ratio: Optional[str] = None,
+        size: str | None = None,
+        aspect_ratio: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Validate and normalize parameters for OpenAI."""
@@ -310,8 +321,7 @@ class OpenAIProvider(ImageProvider):
         if size:
             if size not in OPENAI_SIZES:
                 raise ValueError(
-                    f"Invalid size '{size}' for OpenAI. "
-                    f"Supported sizes: {', '.join(OPENAI_SIZES)}"
+                    f"Invalid size '{size}' for OpenAI. Supported sizes: {', '.join(OPENAI_SIZES)}"
                 )
         else:
             # Default based on aspect ratio if provided
@@ -341,14 +351,14 @@ class OpenAIProvider(ImageProvider):
         self,
         prompt: str,
         *,
-        size: Optional[str] = None,
-        aspect_ratio: Optional[str] = None,
-        conversation_id: Optional[str] = None,
-        reference_images: Optional[list[str]] = None,
+        size: str | None = None,
+        aspect_ratio: str | None = None,
+        conversation_id: str | None = None,
+        reference_images: list[str] | None = None,
         enable_enhancement: bool = True,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         assistant_model: str = "gpt-4o",
-        input_image_file_id: Optional[str] = None,
+        input_image_file_id: str | None = None,
         **kwargs: Any,
     ) -> ImageResult:
         """Generate an image using OpenAI GPT-Image-1."""
@@ -394,7 +404,9 @@ class OpenAIProvider(ImageProvider):
                 provider=self.name,
                 model="gpt-image-1",
                 image_path=image_path,
-                image_base64=result.get("image_data", {}).get("b64_json") if result.get("image_data") else None,
+                image_base64=result.get("image_data", {}).get("b64_json")
+                if result.get("image_data")
+                else None,
                 prompt=prompt,
                 size=size,
                 conversation_id=conversation_id,
@@ -449,3 +461,37 @@ class OpenAIProvider(ImageProvider):
         """Clear conversation history."""
         if conversation_id in self._conversation_store:
             del self._conversation_store[conversation_id]
+
+    def get_conversations(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Get list of recent conversations."""
+        conversations = []
+        for conv_id, messages in self._conversation_store.items():
+            if not messages:
+                continue
+
+            last_msg = messages[-1]
+            last_content = "No content"
+
+            # Try to extract meaningful content from the last message
+            if "content" in last_msg:
+                if isinstance(last_msg["content"], str):
+                    last_content = last_msg["content"][:50]
+                elif isinstance(last_msg["content"], list):
+                    for part in last_msg["content"]:
+                        if part.get("type") == "text":
+                            last_content = part.get("text", "")[:50]
+                            break
+
+            conversations.append(
+                {
+                    "id": conv_id,
+                    "provider": "openai",
+                    "message_count": len(messages),
+                    "last_message": last_content,
+                    "updated": datetime.now(),  # Approximate time
+                }
+            )
+
+        # Sort by ID (approximate time) descending
+        conversations.sort(key=lambda x: str(x["id"]), reverse=True)
+        return conversations[:limit]

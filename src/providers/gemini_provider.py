@@ -14,7 +14,7 @@ import time
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from uuid import uuid4
 
 from ..config.constants import (
@@ -31,12 +31,12 @@ from .base import ImageProvider, ImageResult, ProviderCapabilities
 logger = logging.getLogger(__name__)
 
 # Lazy import for google-genai (may not be installed)
-genai = None
-types = None
-Image = None
+genai: Any = None
+types: Any = None
+Image: Any = None
 
 
-def _import_dependencies():
+def _import_dependencies() -> None:
     """Lazily import Gemini dependencies."""
     global genai, types, Image
     if genai is None:
@@ -53,7 +53,6 @@ def _import_dependencies():
                 "Gemini provider requires google-genai and pillow packages. "
                 "Install with: pip install google-genai pillow"
             ) from e
-
 
 def get_downloads_directory() -> Path:
     """Get the appropriate downloads directory for images."""
@@ -83,13 +82,13 @@ class GeminiProvider(ImageProvider):
     - 1K, 2K, 4K resolution support
     """
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None):
         """Initialize Gemini provider."""
         self._api_key = api_key
         self._client = None
         self._conversation_store: dict[str, list[dict[str, Any]]] = {}
 
-    def _ensure_initialized(self, api_key: Optional[str] = None):
+    def _ensure_initialized(self, api_key: str | None = None) -> None:
         """Ensure dependencies are imported and client is initialized."""
         _import_dependencies()
 
@@ -98,6 +97,7 @@ class GeminiProvider(ImageProvider):
             if not api_key:
                 settings = get_settings()
                 api_key = settings.get_gemini_api_key()
+            # We know genai is not None after _import_dependencies
             self._client = genai.Client(api_key=api_key)
 
     @property
@@ -144,8 +144,8 @@ class GeminiProvider(ImageProvider):
     async def validate_params(
         self,
         prompt: str,
-        size: Optional[str] = None,
-        aspect_ratio: Optional[str] = None,
+        size: str | None = None,
+        aspect_ratio: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Validate and normalize parameters for Gemini."""
@@ -158,8 +158,7 @@ class GeminiProvider(ImageProvider):
             size = size.upper()
             if size not in GEMINI_SIZES:
                 raise ValueError(
-                    f"Invalid size '{size}' for Gemini. "
-                    f"Supported sizes: {', '.join(GEMINI_SIZES)}"
+                    f"Invalid size '{size}' for Gemini. Supported sizes: {', '.join(GEMINI_SIZES)}"
                 )
         else:
             size = "2K"  # Default
@@ -177,9 +176,7 @@ class GeminiProvider(ImageProvider):
         # Validate reference images count
         reference_images = kwargs.get("reference_images", [])
         if len(reference_images) > GEMINI_MAX_REFERENCE_IMAGES:
-            raise ValueError(
-                f"Too many reference images. Maximum {GEMINI_MAX_REFERENCE_IMAGES}."
-            )
+            raise ValueError(f"Too many reference images. Maximum {GEMINI_MAX_REFERENCE_IMAGES}.")
 
         return {
             "prompt": prompt,
@@ -191,14 +188,14 @@ class GeminiProvider(ImageProvider):
         self,
         prompt: str,
         *,
-        size: Optional[str] = None,
-        aspect_ratio: Optional[str] = None,
-        conversation_id: Optional[str] = None,
-        reference_images: Optional[list[str]] = None,
+        size: str | None = None,
+        aspect_ratio: str | None = None,
+        conversation_id: str | None = None,
+        reference_images: list[str] | None = None,
         enable_enhancement: bool = True,
         enable_google_search: bool = False,
-        api_key: Optional[str] = None,
-        model: Optional[str] = None,
+        api_key: str | None = None,
+        model: str | None = None,
         **kwargs: Any,
     ) -> ImageResult:
         """Generate an image using Gemini."""
@@ -207,6 +204,7 @@ class GeminiProvider(ImageProvider):
         try:
             # Ensure initialized
             self._ensure_initialized(api_key)
+            assert self._client is not None, "Gemini client not initialized"
 
             # Validate parameters
             validated = await self.validate_params(
@@ -225,6 +223,23 @@ class GeminiProvider(ImageProvider):
 
             # Build contents list
             contents: list[Any] = []
+
+            # Add previous image from conversation history if available
+            if conversation_id in self._conversation_store:
+                history = self._conversation_store[conversation_id]
+                if history:
+                    # Find last generated image
+                    last_entry = history[-1]
+                    if "image_base64" in last_entry:
+                        try:
+                            last_image_bytes = base64.b64decode(last_entry["image_base64"])
+                            last_pil_image = Image.open(io.BytesIO(last_image_bytes))
+                            contents.append(last_pil_image)
+                            logger.info(
+                                f"Added prev image from conv {conversation_id} as context"
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to load previous image from history: {e}")
 
             # Add reference images if provided (up to 14)
             if reference_images:
@@ -256,7 +271,10 @@ class GeminiProvider(ImageProvider):
 
             config = types.GenerateContentConfig(**config_args)
 
-            logger.info(f"Generating image with Gemini model={model_id}, size={size}, aspect_ratio={aspect_ratio}")
+            logger.info(
+                f"Generating image with Gemini model={model_id}, size={size}, "
+                f"aspect_ratio={aspect_ratio}"
+            )
 
             # Generate content (SDK is synchronous, run in executor)
             loop = asyncio.get_event_loop()
@@ -279,6 +297,17 @@ class GeminiProvider(ImageProvider):
             # Save first image
             image_b64 = extraction["images"][0]
             image_path = self._save_image(image_b64, prompt)
+
+            # Store in conversation history
+            if conversation_id not in self._conversation_store:
+                self._conversation_store[conversation_id] = []
+
+            self._conversation_store[conversation_id].append({
+                "prompt": prompt,
+                "image_base64": image_b64,
+                "timestamp": datetime.now(),
+                "model": model_id
+            })
 
             generation_time = time.time() - start_time
 
@@ -333,11 +362,13 @@ class GeminiProvider(ImageProvider):
                         image_b64 = base64.b64encode(buffer.getvalue()).decode()
 
                         if is_thought:
-                            thoughts.append({
-                                "type": "image",
-                                "data": image_b64,
-                                "index": len(thoughts),
-                            })
+                            thoughts.append(
+                                {
+                                    "type": "image",
+                                    "data": image_b64,
+                                    "index": len(thoughts),
+                                }
+                            )
                         else:
                             images.append(image_b64)
                     except Exception as e:
@@ -346,11 +377,13 @@ class GeminiProvider(ImageProvider):
                 # Extract text
                 if hasattr(part, "text") and part.text:
                     if is_thought:
-                        thoughts.append({
-                            "type": "text",
-                            "data": part.text,
-                            "index": len(thoughts),
-                        })
+                        thoughts.append(
+                            {
+                                "type": "text",
+                                "data": part.text,
+                                "index": len(thoughts),
+                            }
+                        )
                     else:
                         text_parts.append(part.text)
 
@@ -421,6 +454,7 @@ class GeminiProvider(ImageProvider):
         """Enhance prompt using Gemini Flash."""
         try:
             self._ensure_initialized()
+            assert self._client is not None, "Gemini client not initialized"
 
             system_instruction = """You are an expert prompt engineer for image generation.
 Enhance the given prompt to produce better images by:
@@ -455,3 +489,29 @@ Return ONLY the enhanced prompt, no explanation."""
         """Clean up resources."""
         # genai SDK handles cleanup automatically
         self._client = None
+
+    def get_conversations(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Get list of recent conversations."""
+        conversations = []
+        for conv_id, history in self._conversation_store.items():
+            if not history:
+                continue
+
+            last_item = history[-1]
+            last_content = "Image generated"
+            if isinstance(last_item, dict) and "prompt" in last_item:
+                last_content = last_item["prompt"][:50]
+
+            conversations.append(
+                {
+                    "id": conv_id,
+                    "provider": "gemini",
+                    "message_count": len(history),
+                    "last_message": last_content,
+                    "updated": datetime.now(),
+                }
+            )
+
+        # Sort by ID descending
+        conversations.sort(key=lambda x: str(x["id"]), reverse=True)
+        return conversations[:limit]

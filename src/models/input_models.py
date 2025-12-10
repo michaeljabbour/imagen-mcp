@@ -6,7 +6,7 @@ with rich descriptions for Claude to understand how to use them.
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -52,18 +52,18 @@ class ImageGenerationInput(BaseModel):
         max_length=4000,
     )
 
-    provider: Optional[Provider] = Field(
+    provider: Provider | None = Field(
         default=Provider.AUTO,
         description=(
             "Image generation provider to use:\n"
             "- 'auto' (default): Automatically selects best provider based on prompt\n"
-            "- 'openai': OpenAI GPT-Image-1 - best for text rendering, infographics, comics\n"
-            "- 'gemini': Gemini Nano Banana Pro - best for portraits, products, 4K, reference images"
+            "- 'openai': OpenAI GPT-Image-1 - best for text rendering, infographics\n"
+            "- 'gemini': Gemini Nano Banana Pro - best for portraits, products, 4K"
         ),
     )
 
     # Size/resolution (provider-specific)
-    size: Optional[str] = Field(
+    size: str | None = Field(
         default=None,
         description=(
             "Image size. Format depends on provider:\n"
@@ -73,7 +73,7 @@ class ImageGenerationInput(BaseModel):
         ),
     )
 
-    aspect_ratio: Optional[str] = Field(
+    aspect_ratio: str | None = Field(
         default=None,
         description=(
             "Aspect ratio (Gemini only). Options: "
@@ -83,7 +83,7 @@ class ImageGenerationInput(BaseModel):
     )
 
     # Gemini-specific features
-    reference_images: Optional[List[str]] = Field(
+    reference_images: list[str] | None = Field(
         default=None,
         description=(
             "Base64-encoded reference images for style/character consistency (Gemini only). "
@@ -92,7 +92,7 @@ class ImageGenerationInput(BaseModel):
         ),
     )
 
-    enable_google_search: Optional[bool] = Field(
+    enable_google_search: bool | None = Field(
         default=False,
         description=(
             "Enable Google Search grounding for real-time data (Gemini only). "
@@ -101,7 +101,7 @@ class ImageGenerationInput(BaseModel):
         ),
     )
 
-    gemini_model: Optional[str] = Field(
+    gemini_model: str | None = Field(
         default=None,
         description=(
             "Specific Gemini model to use (Gemini only). Options:\n"
@@ -112,23 +112,23 @@ class ImageGenerationInput(BaseModel):
     )
 
     # Common options
-    enhance_prompt: Optional[bool] = Field(
+    enhance_prompt: bool | None = Field(
         default=True,
         description="Whether to enhance the prompt for better results.",
     )
 
-    output_format: Optional[OutputFormat] = Field(
+    output_format: OutputFormat | None = Field(
         default=OutputFormat.MARKDOWN,
         description="Output format for the tool response.",
     )
 
     # API keys (optional overrides)
-    openai_api_key: Optional[str] = Field(
+    openai_api_key: str | None = Field(
         default=None,
         description="OpenAI API key override (uses OPENAI_API_KEY env var if not provided).",
     )
 
-    gemini_api_key: Optional[str] = Field(
+    gemini_api_key: str | None = Field(
         default=None,
         description="Gemini API key override (uses GEMINI_API_KEY env var if not provided).",
     )
@@ -157,7 +157,7 @@ class ConversationalImageInput(BaseModel):
         max_length=4000,
     )
 
-    conversation_id: Optional[str] = Field(
+    conversation_id: str | None = Field(
         default=None,
         description=(
             "Conversation ID from previous generation to continue refining. "
@@ -165,7 +165,7 @@ class ConversationalImageInput(BaseModel):
         ),
     )
 
-    provider: Optional[Provider] = Field(
+    provider: Provider | None = Field(
         default=Provider.AUTO,
         description=(
             "Provider to use. Note: Cannot switch providers mid-conversation. "
@@ -174,7 +174,7 @@ class ConversationalImageInput(BaseModel):
     )
 
     # Dialogue system options
-    dialogue_mode: Optional[str] = Field(
+    dialogue_mode: str | None = Field(
         default="guided",
         description=(
             "Dialogue depth for pre-generation refinement:\n"
@@ -185,29 +185,29 @@ class ConversationalImageInput(BaseModel):
         ),
     )
 
-    skip_dialogue: Optional[bool] = Field(
+    skip_dialogue: bool | None = Field(
         default=False,
         description="Set to true to skip dialogue and generate immediately.",
     )
 
-    dialogue_responses: Optional[Dict[str, Any]] = Field(
+    dialogue_responses: dict[str, Any] | None = Field(
         default=None,
         description="User responses to dialogue questions (internal use).",
     )
 
     # Size/resolution
-    size: Optional[str] = Field(
+    size: str | None = Field(
         default=None,
         description="Image size (provider-specific format). Auto-detected if not specified.",
     )
 
-    aspect_ratio: Optional[str] = Field(
+    aspect_ratio: str | None = Field(
         default=None,
         description="Aspect ratio (Gemini only).",
     )
 
     # Input image for refinement
-    input_image_file_id: Optional[str] = Field(
+    input_image_file_id: str | None = Field(
         default=None,
         description=(
             "File ID from previous generation to refine (OpenAI only). "
@@ -215,24 +215,24 @@ class ConversationalImageInput(BaseModel):
         ),
     )
 
-    input_image_path: Optional[str] = Field(
+    input_image_path: str | None = Field(
         default=None,
         description="Absolute path to local image file to upload and refine.",
     )
 
     # Reference images (Gemini only)
-    reference_images: Optional[List[str]] = Field(
+    reference_images: list[str] | None = Field(
         default=None,
         description="Base64-encoded reference images (Gemini only, up to 14).",
     )
 
-    enable_google_search: Optional[bool] = Field(
+    enable_google_search: bool | None = Field(
         default=False,
         description="Enable Google Search grounding (Gemini only).",
     )
 
     # Gemini-specific
-    gemini_model: Optional[str] = Field(
+    gemini_model: str | None = Field(
         default=None,
         description=(
             "Specific Gemini model (Gemini only):\n"
@@ -243,24 +243,24 @@ class ConversationalImageInput(BaseModel):
     )
 
     # OpenAI-specific
-    assistant_model: Optional[str] = Field(
+    assistant_model: str | None = Field(
         default="gpt-4o",
         description="GPT model for understanding refinement instructions (OpenAI only).",
     )
 
     # Output options
-    output_format: Optional[OutputFormat] = Field(
+    output_format: OutputFormat | None = Field(
         default=OutputFormat.MARKDOWN,
         description="Output format for the tool response.",
     )
 
     # API keys
-    openai_api_key: Optional[str] = Field(
+    openai_api_key: str | None = Field(
         default=None,
         description="OpenAI API key override.",
     )
 
-    gemini_api_key: Optional[str] = Field(
+    gemini_api_key: str | None = Field(
         default=None,
         description="Gemini API key override.",
     )
@@ -275,19 +275,19 @@ class ListConversationsInput(BaseModel):
         extra="forbid",
     )
 
-    limit: Optional[int] = Field(
+    limit: int | None = Field(
         default=10,
         description="Maximum number of conversations to return.",
         ge=1,
         le=100,
     )
 
-    provider: Optional[str] = Field(
+    provider: str | None = Field(
         default=None,
         description="Filter by provider ('openai' or 'gemini').",
     )
 
-    output_format: Optional[OutputFormat] = Field(
+    output_format: OutputFormat | None = Field(
         default=OutputFormat.MARKDOWN,
         description="Output format for the tool response.",
     )
