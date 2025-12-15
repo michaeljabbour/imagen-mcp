@@ -25,6 +25,7 @@ from ..config.constants import (
     GEMINI_SIZES,
     MAX_PROMPT_LENGTH,
 )
+from ..config.paths import resolve_output_path
 from ..config.settings import get_settings
 from .base import ImageProvider, ImageResult, ProviderCapabilities
 
@@ -53,13 +54,6 @@ def _import_dependencies() -> None:
                 "Gemini provider requires google-genai and pillow packages. "
                 "Install with: pip install google-genai pillow"
             ) from e
-
-def get_downloads_directory() -> Path:
-    """Get the appropriate downloads directory for images."""
-    downloads_base = Path.home() / "Downloads"
-    images_dir = downloads_base / "images"
-    images_dir.mkdir(parents=True, exist_ok=True)
-    return images_dir
 
 
 class GeminiProvider(ImageProvider):
@@ -288,7 +282,7 @@ class GeminiProvider(ImageProvider):
             )
 
             # Generate content (SDK is synchronous, run in executor)
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             response = await loop.run_in_executor(
                 None,
                 partial(
@@ -339,7 +333,7 @@ class GeminiProvider(ImageProvider):
             )
 
         except Exception as e:
-            logger.error(f"Gemini image generation failed: {e}")
+            logger.exception("Gemini image generation failed")
             return ImageResult(
                 success=False,
                 provider=self.name,
@@ -427,19 +421,7 @@ class GeminiProvider(ImageProvider):
         prompt_snippet = prompt_snippet.replace(" ", "_")[:20]
         filename = f"gemini_{timestamp}_{prompt_snippet}_{short_id}.png"
 
-        # Determine save location
-        if output_path:
-            path_obj = Path(output_path)
-            # Check if it looks like a directory or file
-            if path_obj.suffix:  # Has extension, treat as file
-                save_path = path_obj
-                # Ensure parent exists
-                save_path.parent.mkdir(parents=True, exist_ok=True)
-            else:  # Treat as directory
-                save_path = path_obj / filename
-                save_path.parent.mkdir(parents=True, exist_ok=True)
-        else:
-            save_path = get_downloads_directory() / filename
+        save_path = resolve_output_path(output_path, default_filename=filename, provider=self.name)
 
         with open(save_path, "wb") as f:
             f.write(image_bytes)
@@ -493,7 +475,7 @@ Return ONLY the enhanced prompt, no explanation."""
 
             config = types.GenerateContentConfig(system_instruction=system_instruction)
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             response = await loop.run_in_executor(
                 None,
                 partial(

@@ -269,6 +269,13 @@ generate_image(prompt="...", output_path="~/Desktop/logos/")
 generate_image(prompt="...", output_path="~/Desktop/logos/my-logo.png")
 ```
 
+If `output_path` is omitted, images are saved to `~/Downloads/images/{provider}` by default
+(`openai` or `gemini`). Override the base directory with the `OUTPUT_DIR` environment variable
+(supports `~` and env vars).
+
+Logs are written to `~/Downloads/images/logs/` by default (or `OUTPUT_DIR/logs/` when `OUTPUT_DIR`
+is set).
+
 ### Gemini-Specific Features
 
 ```
@@ -356,6 +363,10 @@ imagen-mcp/
 | `DEFAULT_OPENAI_SIZE` | Default: "1024x1024" | No |
 | `DEFAULT_GEMINI_SIZE` | Default: "2K" | No |
 | `ENABLE_GOOGLE_SEARCH` | Default: "false" | No |
+| `OUTPUT_DIR` | Default directory for saved images | No |
+| `IMAGEN_MCP_LOG_DIR` | Log directory override | No |
+| `IMAGEN_MCP_LOG_LEVEL` | Log level (e.g. INFO, DEBUG) | No |
+| `IMAGEN_MCP_LOG_PROMPTS` | Log prompts (default: false) | No |
 
 ## Requirements
 

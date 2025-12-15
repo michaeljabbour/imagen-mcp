@@ -33,11 +33,20 @@ class Settings:
     # Output
     output_dir: str | None = None
 
+    # Logging
+    log_dir: str | None = None
+    log_level: str = "INFO"
+    log_max_bytes: int = 5_242_880  # 5 MiB
+    log_backup_count: int = 3
+    log_prompts: bool = False
+
     @classmethod
     def from_env(cls) -> "Settings":
         """Load settings from environment variables."""
         # Support both GEMINI_API_KEY and GOOGLE_API_KEY for Gemini
         gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        log_dir = os.getenv("IMAGEN_MCP_LOG_DIR") or os.getenv("LOG_DIR")
+        log_level = os.getenv("IMAGEN_MCP_LOG_LEVEL") or os.getenv("LOG_LEVEL", "INFO")
 
         return cls(
             openai_api_key=os.getenv("OPENAI_API_KEY"),
@@ -51,6 +60,16 @@ class Settings:
             enable_google_search=os.getenv("ENABLE_GOOGLE_SEARCH", "false").lower() == "true",
             request_timeout=int(os.getenv("REQUEST_TIMEOUT", "120")),
             output_dir=os.getenv("OUTPUT_DIR"),
+            log_dir=log_dir,
+            log_level=log_level,
+            log_max_bytes=int(os.getenv("IMAGEN_MCP_LOG_MAX_BYTES") or os.getenv("LOG_MAX_BYTES", "5242880")),
+            log_backup_count=int(
+                os.getenv("IMAGEN_MCP_LOG_BACKUP_COUNT") or os.getenv("LOG_BACKUP_COUNT", "3")
+            ),
+            log_prompts=(
+                os.getenv("IMAGEN_MCP_LOG_PROMPTS") or os.getenv("LOG_PROMPTS", "false")
+            ).lower()
+            == "true",
         )
 
     def get_openai_api_key(self, provided_key: str | None = None) -> str:

@@ -12,6 +12,8 @@ or allows explicit provider selection.
 
 import json
 import logging
+from hashlib import sha256
+from uuid import uuid4
 
 from mcp.server.fastmcp import FastMCP
 
@@ -24,9 +26,8 @@ from .models.input_models import (
     Provider,
 )
 from .providers import ImageResult, ProviderRecommendation, get_provider_registry
+from .services.logging_config import configure_logging, log_event
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize MCP server
@@ -175,8 +176,30 @@ async def generate_image(params: ImageGenerationInput) -> str:
     Returns:
         Formatted response with image path and metadata.
     """
+    request_id = uuid4().hex[:12]
     try:
+        configure_logging()
         registry = get_provider_registry()
+        settings = get_settings()
+
+        prompt_hash = sha256(params.prompt.encode("utf-8")).hexdigest()
+        start_event: dict[str, object] = {
+            "request_id": request_id,
+            "tool": "generate_image",
+            "provider_requested": params.provider.value if params.provider else None,
+            "prompt_length": len(params.prompt),
+            "prompt_sha256": prompt_hash,
+            "size": params.size,
+            "aspect_ratio": params.aspect_ratio,
+            "reference_images_count": len(params.reference_images or []),
+            "enable_google_search": bool(params.enable_google_search),
+            "enhance_prompt": bool(params.enhance_prompt),
+            "output_path": params.output_path,
+            "output_format": params.output_format.value if params.output_format else None,
+        }
+        if settings.log_prompts:
+            start_event["prompt"] = params.prompt
+        log_event("image.generate.start", **start_event)
 
         # Determine explicit provider if specified
         explicit_provider = None
@@ -196,6 +219,16 @@ async def generate_image(params: ImageGenerationInput) -> str:
             f"Selected provider: {recommendation.provider} "
             f"(confidence: {recommendation.confidence:.0%})"
         )
+        log_event(
+            "image.provider.selected",
+            request_id=request_id,
+            provider=recommendation.provider,
+            confidence=recommendation.confidence,
+            reasoning=recommendation.reasoning,
+            alternative=recommendation.alternative,
+            alternative_reasoning=recommendation.alternative_reasoning,
+            detected_image_type=recommendation.detected_image_type,
+        )
 
         # Generate image
         result = await provider.generate_image(
@@ -212,6 +245,18 @@ async def generate_image(params: ImageGenerationInput) -> str:
             output_path=params.output_path,
         )
 
+        log_event(
+            "image.generate.result",
+            request_id=request_id,
+            success=result.success,
+            provider=result.provider,
+            model=result.model,
+            image_path=str(result.image_path) if result.image_path else None,
+            conversation_id=result.conversation_id,
+            generation_time_seconds=result.generation_time_seconds,
+            error=result.error,
+        )
+
         # Format response
         if params.output_format == OutputFormat.JSON:
             return format_result_json(result, recommendation)
@@ -219,7 +264,8 @@ async def generate_image(params: ImageGenerationInput) -> str:
             return format_result_markdown(result, recommendation)
 
     except Exception as e:
-        logger.error(f"Image generation failed: {e}")
+        logger.exception("Image generation failed")
+        log_event("image.generate.error", request_id=request_id, error=str(e))
         error_response = {
             "success": False,
             "error": str(e),
@@ -262,8 +308,32 @@ async def conversational_image(params: ConversationalImageInput) -> str:
     Returns:
         Either dialogue questions or generated image with metadata.
     """
+    request_id = uuid4().hex[:12]
     try:
+        configure_logging()
         registry = get_provider_registry()
+        settings = get_settings()
+
+        prompt_hash = sha256(params.prompt.encode("utf-8")).hexdigest()
+        start_event: dict[str, object] = {
+            "request_id": request_id,
+            "tool": "conversational_image",
+            "provider_requested": params.provider.value if params.provider else None,
+            "conversation_id": params.conversation_id,
+            "prompt_length": len(params.prompt),
+            "prompt_sha256": prompt_hash,
+            "size": params.size,
+            "aspect_ratio": params.aspect_ratio,
+            "reference_images_count": len(params.reference_images or []),
+            "enable_google_search": bool(params.enable_google_search),
+            "skip_dialogue": bool(params.skip_dialogue),
+            "dialogue_mode": params.dialogue_mode,
+            "output_path": params.output_path,
+            "output_format": params.output_format.value if params.output_format else None,
+        }
+        if settings.log_prompts:
+            start_event["prompt"] = params.prompt
+        log_event("image.conversation.start", **start_event)
 
         # Determine provider
         explicit_provider = None
@@ -277,6 +347,16 @@ async def conversational_image(params: ConversationalImageInput) -> str:
             reference_images=params.reference_images,
             enable_google_search=params.enable_google_search or False,
             explicit_provider=explicit_provider,
+        )
+        log_event(
+            "image.provider.selected",
+            request_id=request_id,
+            provider=recommendation.provider,
+            confidence=recommendation.confidence,
+            reasoning=recommendation.reasoning,
+            alternative=recommendation.alternative,
+            alternative_reasoning=recommendation.alternative_reasoning,
+            detected_image_type=recommendation.detected_image_type,
         )
 
         # For now, skip dialogue and generate directly
@@ -296,13 +376,26 @@ async def conversational_image(params: ConversationalImageInput) -> str:
             output_path=params.output_path,
         )
 
+        log_event(
+            "image.conversation.result",
+            request_id=request_id,
+            success=result.success,
+            provider=result.provider,
+            model=result.model,
+            image_path=str(result.image_path) if result.image_path else None,
+            conversation_id=result.conversation_id,
+            generation_time_seconds=result.generation_time_seconds,
+            error=result.error,
+        )
+
         if params.output_format == OutputFormat.JSON:
             return format_result_json(result, recommendation)
         else:
             return format_result_markdown(result, recommendation)
 
     except Exception as e:
-        logger.error(f"Conversational image generation failed: {e}")
+        logger.exception("Conversational image generation failed")
+        log_event("image.conversation.error", request_id=request_id, error=str(e))
         return f"## ❌ Generation Failed\n\n**Error:** {str(e)}"
 
 
@@ -317,6 +410,7 @@ async def list_providers() -> str:
 
     Use this to understand which provider to choose for your task.
     """
+    configure_logging()
     registry = get_provider_registry()
     return registry.get_comparison()
 
@@ -335,6 +429,7 @@ async def list_conversations(params: ListConversationsInput) -> str:
         List of conversations with metadata.
     """
     try:
+        configure_logging()
         registry = get_provider_registry()
 
         # Ensure providers are initialized to get their conversations
@@ -369,7 +464,7 @@ async def list_conversations(params: ListConversationsInput) -> str:
         return "\n".join(lines)
 
     except Exception as e:
-        logger.error(f"Failed to list conversations: {e}")
+        logger.exception("Failed to list conversations")
         return f"## ❌ Error\n\nFailed to list conversations: {str(e)}"
 
 
@@ -386,6 +481,7 @@ async def list_gemini_models() -> str:
     """
     import httpx
 
+    configure_logging()
     settings = get_settings()
 
     if not settings.has_gemini_key():
@@ -434,7 +530,7 @@ async def list_gemini_models() -> str:
         return "\n".join(lines)
 
     except Exception as e:
-        logger.error(f"Error listing Gemini models: {e}")
+        logger.exception("Error listing Gemini models")
         return f"## ❌ Error\n\nFailed to list models: {str(e)}"
 
 

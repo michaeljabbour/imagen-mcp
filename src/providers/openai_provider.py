@@ -23,19 +23,11 @@ from ..config.constants import (
     OPENAI_API_BASE_URL,
     OPENAI_SIZES,
 )
+from ..config.paths import resolve_output_path
 from ..config.settings import get_settings
 from .base import ImageProvider, ImageResult, ProviderCapabilities
 
 logger = logging.getLogger(__name__)
-
-
-def get_downloads_directory() -> Path:
-    """Get the appropriate downloads directory for images."""
-
-    downloads_base = Path.home() / "Downloads"
-    images_dir = downloads_base / "images"
-    images_dir.mkdir(parents=True, exist_ok=True)
-    return images_dir
 
 
 class OpenAIProvider(ImageProvider):
@@ -418,7 +410,7 @@ class OpenAIProvider(ImageProvider):
             )
 
         except Exception as e:
-            logger.error(f"OpenAI image generation failed: {e}")
+            logger.exception("OpenAI image generation failed")
             return ImageResult(
                 success=False,
                 provider=self.name,
@@ -441,19 +433,7 @@ class OpenAIProvider(ImageProvider):
         prompt_snippet = prompt_snippet.replace(" ", "_")[:20]
         filename = f"openai_{timestamp}_{prompt_snippet}_{short_id}.png"
 
-        # Determine save location
-        if output_path:
-            path_obj = Path(output_path)
-            # Check if it looks like a directory or file
-            if path_obj.suffix:  # Has extension, treat as file
-                save_path = path_obj
-                # Ensure parent exists
-                save_path.parent.mkdir(parents=True, exist_ok=True)
-            else:  # Treat as directory
-                save_path = path_obj / filename
-                save_path.parent.mkdir(parents=True, exist_ok=True)
-        else:
-            save_path = get_downloads_directory() / filename
+        save_path = resolve_output_path(output_path, default_filename=filename, provider=self.name)
 
         with open(save_path, "wb") as f:
             f.write(image_bytes)

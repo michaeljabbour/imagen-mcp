@@ -122,7 +122,9 @@ class ImageGenerationInput(BaseModel):
         description=(
             "Optional path to save the generated image. "
             "If a directory, saves with generated filename. "
-            "If a file path, saves to that exact path."
+            "If a file path, saves to that exact path. "
+            "Supports `~` and environment variables; defaults to `OUTPUT_DIR/{provider}` or "
+            "`~/Downloads/images/{provider}`."
         ),
     )
 
@@ -263,7 +265,9 @@ class ConversationalImageInput(BaseModel):
         description=(
             "Optional path to save the generated image. "
             "If a directory, saves with generated filename. "
-            "If a file path, saves to that exact path."
+            "If a file path, saves to that exact path. "
+            "Supports `~` and environment variables; defaults to `OUTPUT_DIR/{provider}` or "
+            "`~/Downloads/images/{provider}`."
         ),
     )
 
