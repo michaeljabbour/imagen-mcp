@@ -437,7 +437,7 @@ class GeminiProvider(ImageProvider):
                 save_path.parent.mkdir(parents=True, exist_ok=True)
             else:  # Treat as directory
                 save_path = path_obj / filename
-                save_path.mkdir(parents=True, exist_ok=True)
+                save_path.parent.mkdir(parents=True, exist_ok=True)
         else:
             save_path = get_downloads_directory() / filename
 
