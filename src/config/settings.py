@@ -55,14 +55,17 @@ class Settings:
             default_openai_size=os.getenv("DEFAULT_OPENAI_SIZE", "1024x1024"),
             default_gemini_size=os.getenv("DEFAULT_GEMINI_SIZE", "2K"),
             default_gemini_aspect_ratio=os.getenv("DEFAULT_GEMINI_ASPECT_RATIO", "1:1"),
-            enable_prompt_enhancement=os.getenv("ENABLE_PROMPT_ENHANCEMENT", "true").lower()
-            == "true",
+            enable_prompt_enhancement=(
+                os.getenv("ENABLE_PROMPT_ENHANCEMENT", "true").lower() == "true"
+            ),
             enable_google_search=os.getenv("ENABLE_GOOGLE_SEARCH", "false").lower() == "true",
             request_timeout=int(os.getenv("REQUEST_TIMEOUT", "120")),
             output_dir=os.getenv("OUTPUT_DIR"),
             log_dir=log_dir,
             log_level=log_level,
-            log_max_bytes=int(os.getenv("IMAGEN_MCP_LOG_MAX_BYTES") or os.getenv("LOG_MAX_BYTES", "5242880")),
+            log_max_bytes=int(
+                os.getenv("IMAGEN_MCP_LOG_MAX_BYTES") or os.getenv("LOG_MAX_BYTES", "5242880")
+            ),
             log_backup_count=int(
                 os.getenv("IMAGEN_MCP_LOG_BACKUP_COUNT") or os.getenv("LOG_BACKUP_COUNT", "3")
             ),
