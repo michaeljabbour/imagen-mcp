@@ -9,8 +9,7 @@ os.environ.setdefault("GEMINI_API_KEY", "test-key")
 
 
 TINY_PNG_BASE64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7+9pQAAAAA"
-    "SUVORK5CYII="
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7+9pQAAAAASUVORK5CYII="
 )
 
 
@@ -53,7 +52,7 @@ def test_default_output_directory_uses_output_dir_env(tmp_path: Path, monkeypatc
     assert provider_dir.is_dir()
 
 
-def test_provider_save_image_uses_output_dir_env(tmp_path: Path, monkeypatch):
+async def test_provider_save_image_uses_output_dir_env(tmp_path: Path, monkeypatch):
     from src.config.settings import get_settings
     from src.providers.openai_provider import OpenAIProvider
 
@@ -62,17 +61,19 @@ def test_provider_save_image_uses_output_dir_env(tmp_path: Path, monkeypatch):
     get_settings.cache_clear()
 
     provider = OpenAIProvider()
-    saved_path = provider._save_image(TINY_PNG_BASE64, "Test prompt")
+    saved_path = await provider._save_image(TINY_PNG_BASE64, "Test prompt")
     assert saved_path.parent == output_dir / "openai"
     assert saved_path.is_file()
 
 
-def test_provider_save_image_output_path_directory_creates_file(tmp_path: Path):
+async def test_provider_save_image_output_path_directory_creates_file(tmp_path: Path):
     from src.providers.gemini_provider import GeminiProvider
 
     output_dir = tmp_path / "outputs"
     provider = GeminiProvider()
-    saved_path = provider._save_image(TINY_PNG_BASE64, "Test prompt", output_path=str(output_dir))
+    saved_path = await provider._save_image(
+        TINY_PNG_BASE64, "Test prompt", output_path=str(output_dir)
+    )
 
     assert saved_path.parent == output_dir
     assert output_dir.is_dir()

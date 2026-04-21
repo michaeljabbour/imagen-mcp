@@ -2,9 +2,10 @@
 Path utilities for saving generated images.
 
 Centralizes output directory behavior across providers:
-- Expands `~` and environment variables for user-supplied paths
+- Expands `~` for user-supplied paths
 - Supports `OUTPUT_DIR` as the default save directory when `output_path` is omitted
 - Creates parent directories as needed
+- Prevents path traversal attacks by confining output to the allowed base directory
 """
 
 from __future__ import annotations
@@ -16,9 +17,13 @@ from .settings import get_settings
 
 
 def expand_path(path: str) -> Path:
-    """Expand `~` and environment variables in a path string."""
-    expanded = os.path.expandvars(os.path.expanduser(path))
-    return Path(expanded)
+    """Expand `~` in a path string.
+
+    Only tilde expansion is performed.  Environment-variable expansion
+    (``os.path.expandvars``) is deliberately omitted to avoid leaking
+    server-side environment variables through user-supplied paths.
+    """
+    return Path(path).expanduser()
 
 
 def get_base_output_directory() -> Path:
@@ -69,6 +74,8 @@ def resolve_output_path(
     if not default_filename:
         raise ValueError("default_filename must not be empty")
 
+    is_directory = False
+
     if output_path and output_path.strip():
         raw = output_path.strip()
         path_obj = expand_path(raw)
@@ -83,8 +90,31 @@ def resolve_output_path(
         else:
             save_path = path_obj
     else:
-        base_dir = get_provider_output_directory(provider) if provider else get_base_output_directory()
+        if provider:
+            base_dir = get_provider_output_directory(provider)
+        else:
+            base_dir = get_base_output_directory()
         save_path = base_dir / default_filename
+
+    # --- Path traversal prevention ---
+    # Ensure the resolved save path stays within the intended directory,
+    # blocking attempts like "../../etc/passwd".
+    resolved = save_path.resolve()
+
+    if output_path and output_path.strip():
+        # User provided an explicit output path — validate against
+        # the user's intended directory, not the global default.
+        user_base = expand_path(output_path.strip()).resolve()
+        if is_directory:
+            # User specified a directory — save_path must be within it
+            if not str(resolved).startswith(str(user_base) + os.sep):
+                raise ValueError(f"Output path must be within {user_base}")
+        # File-path case: resolved == user_base by construction (no check needed)
+    else:
+        # No custom path — validate against the default output base
+        allowed_base = get_base_output_directory().resolve()
+        if not str(resolved).startswith(str(allowed_base) + os.sep) and resolved != allowed_base:
+            raise ValueError(f"Output path must be within {allowed_base}")
 
     save_path.parent.mkdir(parents=True, exist_ok=True)
     return save_path

@@ -8,6 +8,7 @@ for creating and accessing providers.
 import logging
 from datetime import datetime
 from functools import lru_cache
+from importlib.util import find_spec
 from typing import Any
 
 from ..config.settings import get_settings
@@ -17,6 +18,13 @@ from .openai_provider import OpenAIProvider
 from .selector import ProviderRecommendation, ProviderSelector
 
 logger = logging.getLogger(__name__)
+
+
+def _module_available(module_name: str) -> bool:
+    try:
+        return find_spec(module_name) is not None
+    except (ImportError, ValueError):
+        return False
 
 
 class ProviderRegistry:
@@ -98,6 +106,7 @@ class ProviderRegistry:
         Returns:
             Tuple of (ImageProvider, ProviderRecommendation)
         """
+        available = self.list_providers()
         # Get recommendation
         recommendation = self._selector.suggest_provider(
             prompt,
@@ -105,6 +114,7 @@ class ProviderRegistry:
             reference_images=reference_images,
             enable_google_search=enable_google_search,
             explicit_provider=explicit_provider,
+            available_providers=available,
         )
 
         # Get the provider
@@ -113,27 +123,34 @@ class ProviderRegistry:
         return provider, recommendation
 
     def list_providers(self) -> list[str]:
-        """List all available provider names."""
-        return self._settings.available_providers()
+        """List all available provider names (with API keys and dependencies)."""
+        return [p for p in self.list_all_providers() if self.is_provider_available(p)]
 
     def list_all_providers(self) -> list[str]:
         """List all supported provider names (including unavailable)."""
         return ["openai", "gemini"]
 
     def is_provider_available(self, name: str) -> bool:
-        """Check if a provider is available (has API key configured)."""
+        """Check if a provider is available (has API key and dependencies)."""
         name = name.lower()
         if name == "openai":
-            return self._settings.has_openai_key()
+            if not self._settings.has_openai_key():
+                return False
+            return _module_available("httpx")
         elif name == "gemini":
-            return self._settings.has_gemini_key()
+            if not self._settings.has_gemini_key():
+                return False
+            return _module_available("google.genai") and _module_available("PIL")
         return False
 
     def get_provider_info(self, name: str) -> dict:
         """Get information about a provider."""
         name = name.lower()
 
-        if name == "openai":
+        # Prefer the cached instance to avoid creating throwaway providers
+        if name in self._providers:
+            caps = self._providers[name].capabilities
+        elif name == "openai":
             caps = OpenAIProvider().capabilities
         elif name == "gemini":
             caps = GeminiProvider().capabilities
@@ -157,7 +174,7 @@ class ProviderRegistry:
 
     def get_comparison(self) -> str:
         """Get a formatted comparison of providers."""
-        return self._selector.get_provider_comparison()
+        return self._selector.get_provider_comparison(available_providers=self.list_providers())
 
     async def close_all(self) -> None:
         """Close all provider instances."""

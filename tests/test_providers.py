@@ -29,17 +29,72 @@ class TestOpenAIProvider:
 
         assert isinstance(caps, ProviderCapabilities)
         assert caps.name == "openai"
-        assert caps.display_name == "OpenAI GPT-Image-1"
+        assert "gpt-image-2" in caps.display_name
         assert "1024x1024" in caps.supported_sizes
         assert caps.supports_reference_images is False
         assert caps.supports_real_time_data is False
+        # gpt-image-2 is dramatically faster than 1.x
+        assert caps.typical_latency_seconds <= 15.0
+        # Max resolution is now 1792x1024 on 2.0 (was 1536x1024 on 1.x)
+        assert caps.max_resolution == "1792x1024"
 
     def test_supported_sizes(self):
-        """Provider should support expected sizes."""
+        """Provider should support the full 2.0-era size set."""
         provider = OpenAIProvider()
-        expected_sizes = ["1024x1024", "1024x1536", "1536x1024"]
+        expected_sizes = [
+            "1024x1024",
+            "1024x1536",
+            "1536x1024",
+            "1792x1024",  # new in 2.0-era
+            "1024x1792",  # new in 2.0-era
+            "auto",
+        ]
         for size in expected_sizes:
-            assert size in provider.capabilities.supported_sizes
+            assert size in provider.capabilities.supported_sizes, f"Missing size {size}"
+
+    def test_resolve_model_default(self):
+        """_resolve_model should default to gpt-image-2 when nothing is passed."""
+        from src.config.constants import DEFAULT_OPENAI_IMAGE_MODEL
+
+        provider = OpenAIProvider()
+        assert provider._resolve_model(None) == DEFAULT_OPENAI_IMAGE_MODEL
+        assert provider._resolve_model("") == DEFAULT_OPENAI_IMAGE_MODEL
+
+    def test_resolve_model_explicit(self):
+        """_resolve_model should pass through known aliases and arbitrary names."""
+        provider = OpenAIProvider()
+        assert provider._resolve_model("gpt-image-2") == "gpt-image-2"
+        assert provider._resolve_model("gpt-image-1") == "gpt-image-1"
+        # Unknown names pass through so tests can target future models
+        assert provider._resolve_model("gpt-image-future") == "gpt-image-future"
+
+    @pytest.mark.asyncio
+    async def test_validate_params_accepts_new_options(self):
+        """validate_params should accept and echo back 2.0 parameters."""
+        provider = OpenAIProvider()
+        validated = await provider.validate_params(
+            "A sunset",
+            size="1792x1024",
+            quality="high",
+            openai_output_format="webp",
+            openai_output_compression=80,
+            background="transparent",
+            moderation="low",
+            n=2,
+        )
+        assert validated["size"] == "1792x1024"
+        assert validated["quality"] == "high"
+        assert validated["output_format"] == "webp"
+        assert validated["output_compression"] == 80
+        assert validated["background"] == "transparent"
+        assert validated["moderation"] == "low"
+        assert validated["n"] == 2
+
+    @pytest.mark.asyncio
+    async def test_validate_params_rejects_invalid_quality(self):
+        provider = OpenAIProvider()
+        with pytest.raises(ValueError, match="Invalid quality"):
+            await provider.validate_params("A sunset", quality="super")
 
 
 class TestGeminiProvider:

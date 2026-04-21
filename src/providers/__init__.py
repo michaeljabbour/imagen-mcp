@@ -1,15 +1,13 @@
 """Provider module for imagen-mcp."""
 
-from .base import ImageProvider, ImageResult, ProviderCapabilities
+from .base import ImageProvider, ImageResult
 from .registry import ProviderRegistry, get_provider_registry
-from .selector import ProviderRecommendation, ProviderSelector
+from .selector import ProviderRecommendation
 
 __all__ = [
     "ImageProvider",
     "ImageResult",
-    "ProviderCapabilities",
     "ProviderRegistry",
     "get_provider_registry",
-    "ProviderSelector",
     "ProviderRecommendation",
 ]

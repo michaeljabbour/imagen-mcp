@@ -2,33 +2,82 @@
 Constants for imagen-mcp providers.
 
 This module defines provider-specific constants including supported sizes,
-aspect ratios, and model identifiers.
+aspect ratios, quality tiers, and model identifiers.
 """
 
 # ============================
-# OpenAI GPT-Image-1 Constants
+# OpenAI gpt-image-2 Constants
 # ============================
+#
+# Verified against openai>=2.31.0 SDK (images.generate / images.edit signatures).
+# The SDK is the source of truth; these constants mirror the typed literal
+# options so validate_params() can reject anything the API will reject.
 
 OPENAI_API_BASE_URL = "https://api.openai.com/v1"
 
-# OpenAI only supports these 3 sizes (verified from API)
-OPENAI_SIZES = [
-    "1024x1024",  # Square
-    "1024x1536",  # Portrait
-    "1536x1024",  # Landscape
-]
-
+# Image generation models
 OPENAI_MODELS = {
-    # Image generation models
-    "gpt-image-1": "gpt-image-1",  # Dedicated image model (April 2025)
-    "gpt-5-image": "gpt-5-image",  # GPT-5 with image generation (Oct 2025)
-    # Conversation orchestration models
-    "gpt-5.1": "gpt-5.1",  # Latest reasoning model (Nov 2025)
-    "gpt-4o": "gpt-4o",  # Multimodal model
+    "gpt-image-2": "gpt-image-2",  # ChatGPT Images 2.0 (GA April 2026) - default
+    "gpt-image-1": "gpt-image-1",  # Legacy dedicated image model (April 2025)
+    "gpt-image-1.5": "gpt-image-1.5",  # Interim model (Dec 2025)
+    # Conversation orchestration models (used by the Responses-API multi-turn path)
+    "gpt-5.1": "gpt-5.1",
+    "gpt-4o": "gpt-4o",
 }
 
-# Default OpenAI model for image generation
-DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-1"
+# Default OpenAI model for image generation (ChatGPT Images 2.0)
+DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-2"
+
+# Sizes supported by the /images/generations endpoint (per SDK 2.31.0 literal).
+# gpt-image-2 adds ultrawide (1792x1024) and ultratall (1024x1792) over 1.x.
+OPENAI_SIZES = [
+    "auto",  # Let the model choose
+    "1024x1024",  # Square (baseline)
+    "1536x1024",  # Landscape 3:2
+    "1024x1536",  # Portrait 2:3
+    "1792x1024",  # Widescreen 16:9-ish (new in 2.0-era)
+    "1024x1792",  # Tall 9:16-ish (new in 2.0-era)
+    "512x512",  # Small square (legacy)
+    "256x256",  # Thumbnail (legacy)
+]
+
+# Sizes supported by the /images/edits endpoint (per SDK 2.31.0 literal).
+# Note: edits do NOT support 1792x1024 / 1024x1792.
+OPENAI_EDIT_SIZES = [
+    "auto",
+    "1024x1024",
+    "1536x1024",
+    "1024x1536",
+    "512x512",
+    "256x256",
+]
+
+# Quality tiers for gpt-image-2 (low/medium/high/auto are current;
+# standard/hd are legacy DALL-E-era values still accepted by the SDK).
+OPENAI_QUALITY_OPTIONS = ["auto", "low", "medium", "high", "standard", "hd"]
+DEFAULT_OPENAI_QUALITY = "auto"
+
+# Output image encoding formats
+OPENAI_OUTPUT_FORMATS = ["png", "jpeg", "webp"]
+DEFAULT_OPENAI_OUTPUT_FORMAT = "png"
+
+# Background treatment — transparent requires png or webp
+OPENAI_BACKGROUND_OPTIONS = ["auto", "transparent", "opaque"]
+DEFAULT_OPENAI_BACKGROUND = "auto"
+
+# Content moderation strictness
+OPENAI_MODERATION_OPTIONS = ["auto", "low"]
+DEFAULT_OPENAI_MODERATION = "auto"
+
+# DALL-E-era style hint (kept for backward compat; largely a no-op on gpt-image-2)
+OPENAI_STYLES = ["vivid", "natural"]
+
+# Input fidelity for /images/edits — gpt-image-2 works best at high
+OPENAI_INPUT_FIDELITY_OPTIONS = ["high", "low"]
+DEFAULT_OPENAI_INPUT_FIDELITY = "high"
+
+# Max number of images per request (SDK caps; OpenAI may return fewer)
+OPENAI_MAX_N = 10
 
 # ============================
 # Google Gemini Constants
@@ -36,18 +85,20 @@ DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-1"
 
 # Gemini model identifiers
 GEMINI_MODELS = {
-    # Nano Banana Pro - highest quality, best for production
-    "gemini-3-pro-image-preview": "gemini-3-pro-image-preview",
-    # Gemini 2.0 Flash - fast experimental image generation
-    "gemini-2.0-flash-exp-image-generation": "gemini-2.0-flash-exp-image-generation",
-    # Imagen 3.0 - alternative image model
-    "imagen-3.0-generate-002": "imagen-3.0-generate-002",
-    # For prompt enhancement (text only)
-    "gemini-flash-latest": "gemini-flash-latest",
+    "gemini-2.5-flash-preview-image-generation": {
+        "description": "Gemini 2.5 Flash with image generation (GA)",
+        "speed": "fast",
+        "quality": "good",
+    },
+    "gemini-3-pro-image-preview": {
+        "description": "Gemini 3 Pro image preview (highest quality)",
+        "speed": "slow",
+        "quality": "best",
+    },
 }
 
 # Default Gemini model for image generation
-DEFAULT_GEMINI_IMAGE_MODEL = "gemini-3-pro-image-preview"
+DEFAULT_GEMINI_IMAGE_MODEL = "gemini-2.5-flash-preview-image-generation"
 
 # Gemini supports 10 aspect ratios
 GEMINI_ASPECT_RATIOS = [
@@ -108,6 +159,12 @@ OPENAI_PREFERRED_KEYWORDS = [
     "banner",
     "sign",
     "watermark",
+    # 2.0-era strengths: UI mockups, brand-accurate rendering, world knowledge
+    "ui mockup",
+    "screenshot",
+    "app interface",
+    "webpage",
+    "dashboard",
 ]
 
 # Keywords that suggest Gemini is better

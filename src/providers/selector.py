@@ -18,6 +18,20 @@ from ..config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
+# Pre-compiled image-type patterns (module-level to avoid re-compilation)
+_IMAGE_TYPE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("portrait", re.compile(r"\b(portrait|headshot|face|person|selfie)\b")),
+    ("product", re.compile(r"\b(product|item|merchandise|goods|e-commerce)\b")),
+    ("landscape", re.compile(r"\b(landscape|scenery|vista|panorama)\b")),
+    ("diagram", re.compile(r"\b(diagram|flowchart|infographic|chart|graph)\b")),
+    ("logo", re.compile(r"\b(logo|icon|symbol|emblem)\b")),
+    ("comic", re.compile(r"\b(comic|cartoon|panel|manga|anime)\b")),
+    ("menu", re.compile(r"\b(menu|card|list|catalog)\b")),
+    ("poster", re.compile(r"\b(poster|flyer|banner|advertisement)\b")),
+    ("photo", re.compile(r"\b(photo|photograph|picture|image of)\b")),
+    ("art", re.compile(r"\b(painting|artwork|illustration|drawing)\b")),
+]
+
 
 @dataclass
 class ProviderRecommendation:
@@ -35,6 +49,12 @@ class ProviderRecommendation:
     requires_real_time_data: bool = False
     requires_high_resolution: bool = False
     detected_image_type: str | None = None
+
+    # Fallback information (set when preferred provider was unavailable)
+    is_fallback: bool = False
+    fallback_notice: str | None = None
+    preferred_provider: str | None = None
+    missing_features: list[str] | None = None
 
 
 class ProviderSelector:
@@ -62,6 +82,7 @@ class ProviderSelector:
         reference_images: list[str] | None = None,
         enable_google_search: bool = False,
         explicit_provider: str | None = None,
+        available_providers: list[str] | None = None,
     ) -> ProviderRecommendation:
         """
         Analyze prompt and requirements to suggest the best provider.
@@ -79,7 +100,11 @@ class ProviderSelector:
         prompt_lower = prompt.lower()
 
         # Check available providers
-        available = self.settings.available_providers()
+        available = (
+            available_providers
+            if available_providers is not None
+            else self.settings.available_providers()
+        )
         if not available:
             raise ValueError("No providers available. Set OPENAI_API_KEY or GEMINI_API_KEY.")
 
@@ -92,9 +117,30 @@ class ProviderSelector:
                     reasoning=f"User explicitly requested {explicit_provider} provider.",
                 )
             else:
+                fallback = [p for p in available if p != explicit_provider]
+                if not fallback:
+                    raise ValueError(
+                        f"Requested provider '{explicit_provider}' not available "
+                        f"and no alternatives found. Set the appropriate API key."
+                    )
+                fallback_provider = fallback[0]
                 logger.warning(
                     f"Requested provider '{explicit_provider}' not available. "
-                    f"Available: {available}"
+                    f"Falling back to '{fallback_provider}'."  # noqa: E501
+                )
+                return ProviderRecommendation(
+                    provider=fallback_provider,
+                    confidence=0.5,
+                    reasoning=(
+                        f"Fallback: '{explicit_provider}' was requested but is not configured."
+                    ),
+                    is_fallback=True,
+                    fallback_notice=(
+                        f"You requested **{explicit_provider}**, but it's not configured. "
+                        f"Using **{fallback_provider}** instead. "
+                        f"Set `{explicit_provider.upper()}_API_KEY` to use {explicit_provider}."
+                    ),
+                    preferred_provider=explicit_provider,
                 )
 
         # Check for hard requirements that force a specific provider
@@ -112,9 +158,35 @@ class ProviderSelector:
                     requires_high_resolution=self._needs_high_resolution(size),
                 )
             else:
+                fallback = [p for p in available if p != forced_provider]
+                if not fallback:
+                    raise ValueError(
+                        f"This request requires {forced_provider} ({force_reason}) "
+                        f"but it's not configured and no alternatives are available."
+                    )
+                fallback_provider = fallback[0]
+                missing = self._describe_missing_features(
+                    forced_provider, fallback_provider, reference_images, enable_google_search, size
+                )
                 logger.warning(
                     f"Required provider '{forced_provider}' not available. "
-                    f"Falling back to available provider."
+                    f"Falling back to '{fallback_provider}'. Missing features: {missing}"
+                )
+                return ProviderRecommendation(
+                    provider=fallback_provider,
+                    confidence=0.3,
+                    reasoning=f"Fallback: {force_reason}, but {forced_provider} is not configured.",
+                    requires_reference_images=bool(reference_images),
+                    requires_real_time_data=enable_google_search,
+                    requires_high_resolution=self._needs_high_resolution(size),
+                    is_fallback=True,
+                    fallback_notice=(
+                        f"This prompt is best suited for **{forced_provider}** ({force_reason}), "
+                        f"but it's not configured. Using **{fallback_provider}** instead. "
+                        f"Set `{forced_provider.upper()}_API_KEY` for better results."
+                    ),
+                    preferred_provider=forced_provider,
+                    missing_features=missing,
                 )
 
         # Score each provider based on prompt analysis
@@ -140,14 +212,29 @@ class ProviderSelector:
             primary, alt = "gemini", "openai"
             primary_reasons, alt_reasons = gemini_reasons, openai_reasons
 
-        # Ensure primary is available
+        # Ensure primary is available — track if we had to swap
+        swapped = False
+        original_primary = primary
         if primary not in available:
             primary, alt = alt, primary
             primary_reasons, alt_reasons = alt_reasons, primary_reasons
+            swapped = True
 
         # Calculate confidence based on score difference
         score_diff = abs(openai_score - gemini_score)
         confidence = min(0.95, 0.5 + score_diff)
+        if swapped:
+            confidence = max(0.3, confidence - 0.2)
+
+        # Build fallback info if we had to swap
+        fallback_notice = None
+        if swapped and score_diff > 0.1:
+            fallback_notice = (
+                f"**{original_primary.title()}** would be better for this prompt"
+                f" ({'; '.join(alt_reasons) if alt_reasons else 'higher score'}), "
+                f"but it's not configured. Using **{primary}** instead. "
+                f"Set `{original_primary.upper()}_API_KEY` for better results."
+            )
 
         return ProviderRecommendation(
             provider=primary,
@@ -157,6 +244,9 @@ class ProviderSelector:
             alternative_reasoning="; ".join(alt_reasons) if alt_reasons else None,
             requires_text_rendering=self._needs_text_rendering(prompt_lower),
             detected_image_type=image_type,
+            is_fallback=swapped,
+            fallback_notice=fallback_notice,
+            preferred_provider=original_primary if swapped else None,
         )
 
     def _check_hard_requirements(
@@ -167,7 +257,9 @@ class ProviderSelector:
         size: str | None,
     ) -> tuple[str | None, str]:
         """Check for requirements that force a specific provider."""
-        # Reference images require Gemini
+        # Reference images require Gemini (for /images/generations-style
+        # multi-reference consistency). OpenAI's edit_image tool supports
+        # single-image editing but not the ref-set pattern Gemini exposes.
         if reference_images and len(reference_images) > 0:
             return "gemini", "Reference images require Gemini provider"
 
@@ -175,9 +267,9 @@ class ProviderSelector:
         if enable_google_search:
             return "gemini", "Google Search grounding requires Gemini provider"
 
-        # 4K resolution requires Gemini
+        # Native 4K requires Gemini (OpenAI gpt-image-2 maxes at 1792x1024)
         if size and size.upper() == "4K":
-            return "gemini", "4K resolution requires Gemini provider"
+            return "gemini", "Native 4K resolution requires Gemini provider"
 
         # Check for real-time data keywords
         for keyword in GEMINI_REQUIRED_KEYWORDS:
@@ -185,6 +277,32 @@ class ProviderSelector:
                 return "gemini", f"Real-time data keyword '{keyword}' requires Gemini"
 
         return None, ""
+
+    def _describe_missing_features(
+        self,
+        preferred: str,
+        fallback: str,
+        reference_images: list[str] | None,
+        enable_google_search: bool,
+        size: str | None,
+    ) -> list[str]:
+        """Describe features that will be missing due to provider fallback."""
+        missing = []
+        if preferred == "gemini" and fallback == "openai":
+            if reference_images:
+                missing.append(
+                    "multi-reference image sets "
+                    "(OpenAI supports single-image editing via edit_image only)"
+                )
+            if enable_google_search:
+                missing.append("Google Search grounding (OpenAI does not support this)")
+            if size and size.upper() == "4K":
+                missing.append("native 4K resolution (max 1792x1024 with OpenAI gpt-image-2)")
+        elif preferred == "openai" and fallback == "gemini":
+            missing.append(
+                "~99% character-accurate text rendering (OpenAI gpt-image-2 excels at text)"
+            )
+        return missing
 
     def _score_for_openai(self, prompt_lower: str) -> tuple[float, list[str]]:
         """Score how well OpenAI fits this prompt."""
@@ -264,21 +382,8 @@ class ProviderSelector:
 
     def _detect_image_type(self, prompt_lower: str) -> str | None:
         """Detect the type of image being requested."""
-        type_patterns = {
-            "portrait": r"\b(portrait|headshot|face|person|selfie)\b",
-            "product": r"\b(product|item|merchandise|goods|e-commerce)\b",
-            "landscape": r"\b(landscape|scenery|vista|panorama)\b",
-            "diagram": r"\b(diagram|flowchart|infographic|chart|graph)\b",
-            "logo": r"\b(logo|icon|symbol|emblem)\b",
-            "comic": r"\b(comic|cartoon|panel|manga|anime)\b",
-            "menu": r"\b(menu|card|list|catalog)\b",
-            "poster": r"\b(poster|flyer|banner|advertisement)\b",
-            "photo": r"\b(photo|photograph|picture|image of)\b",
-            "art": r"\b(painting|artwork|illustration|drawing)\b",
-        }
-
-        for image_type, pattern in type_patterns.items():
-            if re.search(pattern, prompt_lower):
+        for image_type, pattern in _IMAGE_TYPE_PATTERNS:
+            if pattern.search(prompt_lower):
                 return image_type
 
         return None
@@ -310,36 +415,45 @@ class ProviderSelector:
             return False
         return size.upper() in ["4K", "2K", "1536x1024", "1024x1536"]
 
-    def get_provider_comparison(self) -> str:
+    def get_provider_comparison(self, *, available_providers: list[str] | None = None) -> str:
         """Get a formatted comparison of available providers."""
-        available = self.settings.available_providers()
+        available = (
+            available_providers
+            if available_providers is not None
+            else self.settings.available_providers()
+        )
 
         lines = [
             "## Provider Comparison",
             "",
-            "| Feature | OpenAI GPT-Image-1 | Gemini Nano Banana Pro |",
-            "|---------|-------------------|------------------------|",
+            "| Feature | OpenAI gpt-image-2 | Gemini Nano Banana Pro |",
+            "|---------|---------------------|------------------------|",
             f"| Available | {'✅' if 'openai' in available else '❌'} | "
             f"{'✅' if 'gemini' in available else '❌'} |",
-            "| Text Rendering | ⭐⭐⭐ Excellent | ⭐⭐ Good |",
-            "| Photorealism | ⭐⭐ Good | ⭐⭐⭐ Excellent |",
-            "| Speed | ~60s | ~15s |",
-            "| Max Resolution | 1536x1024 | 4K |",
-            "| Reference Images | ❌ | ✅ (up to 14) |",
+            "| Text Rendering | ⭐⭐⭐ Excellent (~99%) | ⭐⭐ Good |",
+            "| Photorealism | ⭐⭐⭐ Near-photographic | ⭐⭐⭐ Excellent |",
+            "| Speed | ~3-8s | ~15s |",
+            "| Max Resolution | 1792x1024 | 4K (2048x2048) |",
+            "| Reference Images | Single-image via edit_image | ✅ Multi-ref (up to 14) |",
             "| Real-time Data | ❌ | ✅ (Google Search) |",
+            "| Sequential Editing | ✅ (preserve-pixel edits) | ⚠️ Limited |",
+            "| Token Usage Tracking | ✅ | ❌ |",
             "",
             "### When to Use Each:",
             "",
-            "**OpenAI GPT-Image-1:**",
+            "**OpenAI gpt-image-2 (ChatGPT Images 2.0):**",
             "- Text-heavy images (menus, infographics, posters)",
-            "- Comics with dialogue",
-            "- Technical diagrams with labels",
+            "- UI mockups and screenshot-style renders",
+            "- Comics with dialogue and speech bubbles",
+            "- Technical diagrams with precise labels",
+            "- Multi-step edits that preserve unchanged pixels",
             "",
             "**Gemini Nano Banana Pro:**",
             "- Photorealistic portraits and headshots",
             "- Product photography",
-            "- High resolution (4K) output",
-            "- Character consistency with reference images",
+            "- Native 4K resolution output",
+            "- Character consistency across multiple reference images",
+            "- Real-time grounded visualization (weather, stocks)",
         ]
 
         return "\n".join(lines)

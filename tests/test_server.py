@@ -18,10 +18,20 @@ class TestServerImports:
 
     def test_config_imports(self):
         """Config modules should import without errors."""
-        from src.config.constants import GEMINI_SIZES, OPENAI_SIZES
+        from src.config.constants import (
+            DEFAULT_OPENAI_IMAGE_MODEL,
+            GEMINI_SIZES,
+            OPENAI_QUALITY_OPTIONS,
+            OPENAI_SIZES,
+        )
         from src.config.settings import get_settings
 
-        assert len(OPENAI_SIZES) == 3
+        # gpt-image-2 supports a wider size range than 1.x did
+        assert len(OPENAI_SIZES) >= 6
+        assert "1024x1024" in OPENAI_SIZES
+        assert "1792x1024" in OPENAI_SIZES  # new in 2.0-era
+        assert DEFAULT_OPENAI_IMAGE_MODEL == "gpt-image-2"
+        assert "high" in OPENAI_QUALITY_OPTIONS
         assert len(GEMINI_SIZES) == 3
         assert get_settings() is not None
 
@@ -86,15 +96,17 @@ class TestInputModels:
         # Valid input
         input_data = ImageGenerationInput(prompt="A sunset over mountains")
         assert input_data.prompt == "A sunset over mountains"
+        assert input_data.provider is not None
         assert input_data.provider.value == "auto"  # default is auto
         assert input_data.size is None  # default
 
     def test_image_generation_with_provider(self):
         """ImageGenerationInput should accept provider."""
         from src.models import ImageGenerationInput
+        from src.models.input_models import Provider
 
-        input_data = ImageGenerationInput(prompt="A sunset", provider="gemini", size="4K")
-        assert input_data.provider == "gemini"
+        input_data = ImageGenerationInput(prompt="A sunset", provider=Provider("gemini"), size="4K")
+        assert input_data.provider == Provider("gemini")
         assert input_data.size == "4K"
 
     def test_conversational_input(self):

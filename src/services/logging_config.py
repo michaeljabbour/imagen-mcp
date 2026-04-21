@@ -26,14 +26,19 @@ _CONFIGURED = False
 def _has_rotating_file_handler(logger: logging.Logger, file_path: Path) -> bool:
     target = str(file_path)
     for handler in logger.handlers:
-        if isinstance(handler, RotatingFileHandler) and getattr(handler, "baseFilename", "") == target:
+        if (
+            isinstance(handler, RotatingFileHandler)
+            and getattr(handler, "baseFilename", "") == target
+        ):
             return True
     return False
 
 
 def _has_console_handler(logger: logging.Logger) -> bool:
     for handler in logger.handlers:
-        if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+        if isinstance(handler, logging.StreamHandler) and not isinstance(
+            handler, logging.FileHandler
+        ):
             return True
     return False
 
@@ -96,7 +101,9 @@ def configure_logging() -> None:
             events_handler.setFormatter(logging.Formatter("%(message)s"))
             events_logger.addHandler(events_handler)
     except Exception:
-        root_logger.exception("Failed to initialize file logging; continuing with console logging only")
+        root_logger.exception(
+            "Failed to initialize file logging; continuing with console logging only"
+        )
 
     _CONFIGURED = True
 

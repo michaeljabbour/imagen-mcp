@@ -12,26 +12,54 @@ or allows explicit provider selection.
 
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from hashlib import sha256
+from typing import Any
 from uuid import uuid4
 
 from mcp.server.fastmcp import FastMCP
 
 from .config.settings import get_settings
+from .exceptions import ImagenError, _sanitize_message
 from .models.input_models import (
     ConversationalImageInput,
+    EditImageInput,
     ImageGenerationInput,
     ListConversationsInput,
     OutputFormat,
     Provider,
 )
 from .providers import ImageResult, ProviderRecommendation, get_provider_registry
+from .services.dialogue import DialogueSystem, create_dialogue_response
 from .services.logging_config import configure_logging, log_event
 
 logger = logging.getLogger(__name__)
 
+
+# ============================
+# Lifespan (startup / shutdown)
+# ============================
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastMCP) -> AsyncIterator[None]:
+    """Manage server-wide resources across the process lifetime."""
+    # --- startup ---
+    configure_logging()
+    logger.info("imagen-mcp server starting")
+    yield
+    # --- shutdown ---
+    logger.info("imagen-mcp server shutting down — closing providers")
+    try:
+        registry = get_provider_registry()
+        await registry.close_all()
+    except Exception:
+        logger.exception("Error during provider cleanup")
+
+
 # Initialize MCP server
-mcp = FastMCP("imagen_mcp")
+mcp = FastMCP("imagen_mcp", lifespan=_lifespan)
 
 # ============================
 # Helper Functions
@@ -44,18 +72,36 @@ def format_result_markdown(
 ) -> str:
     """Format image generation result as markdown."""
     if not result.success:
-        return f"## ❌ Image Generation Failed\n\n**Error:** {result.error}"
+        # Include fallback notice even on failure so user knows why
+        error_lines = [f"## ❌ Image Generation Failed\n\n**Error:** {result.error}"]
+        if recommendation and recommendation.fallback_notice:
+            error_lines.append("")
+            error_lines.append(f"> ⚠️ {recommendation.fallback_notice}")
+        return "\n".join(error_lines)
 
     lines = [
         "## ✅ Image Generated Successfully",
         "",
     ]
 
-    # Provider info
-    if recommendation:
+    # Fallback warning (shown prominently before provider info)
+    if recommendation and recommendation.fallback_notice:
         lines.extend(
             [
-                f"**Provider:** {result.provider.title()} (auto-selected)",
+                f"> ⚠️ **Provider Fallback:** {recommendation.fallback_notice}",
+                "",
+            ]
+        )
+        if recommendation.missing_features:
+            lines.append("> **Missing features:** " + ", ".join(recommendation.missing_features))
+            lines.append("")
+
+    # Provider info
+    if recommendation:
+        label = "(fallback)" if recommendation.is_fallback else "(auto-selected)"
+        lines.extend(
+            [
+                f"**Provider:** {result.provider.title()} {label}",
                 f"**Reasoning:** {recommendation.reasoning}",
                 "",
             ]
@@ -132,6 +178,10 @@ def format_result_json(
             "confidence": recommendation.confidence,
             "reasoning": recommendation.reasoning,
             "alternative": recommendation.alternative,
+            "is_fallback": recommendation.is_fallback,
+            "fallback_notice": recommendation.fallback_notice,
+            "preferred_provider": recommendation.preferred_provider,
+            "missing_features": recommendation.missing_features,
         }
     return json.dumps(data, indent=2, default=str)
 
@@ -178,7 +228,6 @@ async def generate_image(params: ImageGenerationInput) -> str:
     """
     request_id = uuid4().hex[:12]
     try:
-        configure_logging()
         registry = get_provider_registry()
         settings = get_settings()
 
@@ -230,7 +279,20 @@ async def generate_image(params: ImageGenerationInput) -> str:
             detected_image_type=recommendation.detected_image_type,
         )
 
-        # Generate image
+        # Generate image — forward OpenAI gpt-image-2 params only when OpenAI is
+        # the selected provider to avoid polluting Gemini's signature.
+        openai_kwargs: dict[str, Any] = {}
+        if recommendation.provider == "openai":
+            openai_kwargs = {
+                "openai_model": params.openai_model,
+                "quality": params.quality,
+                "openai_output_format": params.openai_output_format,
+                "openai_output_compression": params.openai_output_compression,
+                "background": params.background,
+                "moderation": params.moderation,
+                "n": params.n,
+            }
+
         result = await provider.generate_image(
             params.prompt,
             size=params.size,
@@ -243,6 +305,7 @@ async def generate_image(params: ImageGenerationInput) -> str:
             else params.gemini_api_key,
             model=params.gemini_model if recommendation.provider == "gemini" else None,
             output_path=params.output_path,
+            **openai_kwargs,
         )
 
         log_event(
@@ -263,17 +326,32 @@ async def generate_image(params: ImageGenerationInput) -> str:
         else:
             return format_result_markdown(result, recommendation)
 
-    except Exception as e:
+    except ImagenError as e:
         logger.exception("Image generation failed")
         log_event("image.generate.error", request_id=request_id, error=str(e))
         error_response = {
             "success": False,
-            "error": str(e),
+            "error": e.user_message,
         }
         if params.output_format == OutputFormat.JSON:
             return json.dumps(error_response, indent=2)
         else:
-            return f"## ❌ Image Generation Failed\n\n**Error:** {str(e)}"
+            return (
+                f"## ❌ Image Generation Failed\n\n**Error ({type(e).__name__}):** {e.user_message}"
+            )
+
+    except Exception as e:
+        logger.exception("Image generation failed")
+        sanitized = _sanitize_message(str(e))
+        log_event("image.generate.error", request_id=request_id, error=sanitized)
+        error_response = {
+            "success": False,
+            "error": sanitized,
+        }
+        if params.output_format == OutputFormat.JSON:
+            return json.dumps(error_response, indent=2)
+        else:
+            return f"## ❌ Image Generation Failed\n\n**Error:** {sanitized}"
 
 
 @mcp.tool(name="conversational_image")
@@ -310,7 +388,6 @@ async def conversational_image(params: ConversationalImageInput) -> str:
     """
     request_id = uuid4().hex[:12]
     try:
-        configure_logging()
         registry = get_provider_registry()
         settings = get_settings()
 
@@ -359,8 +436,21 @@ async def conversational_image(params: ConversationalImageInput) -> str:
             detected_image_type=recommendation.detected_image_type,
         )
 
-        # For now, skip dialogue and generate directly
-        # TODO: Integrate dialogue system with provider awareness
+        # Integrate dialogue system
+        dialogue = DialogueSystem(mode=params.dialogue_mode or "guided")
+        dialogue_result = dialogue.analyze(params.prompt)
+
+        # If dialogue needs more info, return questions (unless skip_dialogue)
+        if not params.skip_dialogue and not dialogue_result.should_generate:
+            log_event(
+                "image.conversation.dialogue",
+                request_id=request_id,
+                questions_count=len(dialogue_result.questions),
+                detected_intent=dialogue_result.detected_intent,
+            )
+            return create_dialogue_response(dialogue_result, recommendation.provider)
+
+        # Generate the image
         result = await provider.generate_image(
             params.prompt,
             size=params.size,
@@ -374,6 +464,9 @@ async def conversational_image(params: ConversationalImageInput) -> str:
             else params.gemini_api_key,
             model=params.gemini_model if recommendation.provider == "gemini" else None,
             output_path=params.output_path,
+            # OpenAI-specific conversational fields
+            assistant_model=params.assistant_model or "gpt-4o",
+            input_image_file_id=params.input_image_file_id,
         )
 
         log_event(
@@ -393,10 +486,136 @@ async def conversational_image(params: ConversationalImageInput) -> str:
         else:
             return format_result_markdown(result, recommendation)
 
-    except Exception as e:
+    except ImagenError as e:
         logger.exception("Conversational image generation failed")
         log_event("image.conversation.error", request_id=request_id, error=str(e))
-        return f"## ❌ Generation Failed\n\n**Error:** {str(e)}"
+        return f"## ❌ Generation Failed\n\n**Error ({type(e).__name__}):** {e.user_message}"
+
+    except Exception as e:
+        logger.exception("Conversational image generation failed")
+        sanitized = _sanitize_message(str(e))
+        log_event("image.conversation.error", request_id=request_id, error=sanitized)
+        return f"## ❌ Generation Failed\n\n**Error:** {sanitized}"
+
+
+@mcp.tool(name="edit_image")
+async def edit_image(params: EditImageInput) -> str:
+    """Edit an existing image using OpenAI gpt-image-2's /images/edits endpoint.
+
+    This is the right tool for:
+    - Image-to-image refinement (OpenAI's answer to reference images)
+    - Inpainting with a mask (paint over regions while preserving the rest)
+    - Sequential/cumulative edits that preserve unchanged pixels
+    - Brand-accurate modifications to existing images
+
+    **Key features of gpt-image-2 editing:**
+    - `input_fidelity='high'` (default) keeps unchanged pixels constant —
+      critical for multi-step refinement where each edit should build on
+      the last without drift.
+    - Full control over quality, background, output_format, and compression.
+    - Supports optional PNG mask (transparent pixels are the edit region).
+
+    **Typical workflow:**
+    1. Generate or obtain a base image (path on disk)
+    2. Call edit_image with prompt='change the sky to sunset'
+    3. Take the output path, call edit_image again with next instruction
+    4. Repeat — each step preserves pixels outside the described change
+
+    Args:
+        params: Edit parameters including prompt, image_path, and options.
+
+    Returns:
+        Formatted response with edited image path and metadata.
+    """
+    request_id = uuid4().hex[:12]
+    try:
+        registry = get_provider_registry()
+        settings = get_settings()
+
+        if not registry.is_provider_available("openai"):
+            msg = (
+                "## ❌ edit_image Unavailable\n\n"
+                "OpenAI provider is not configured. "
+                "Set `OPENAI_API_KEY` to enable image editing via gpt-image-2."
+            )
+            return msg
+
+        prompt_hash = sha256(params.prompt.encode("utf-8")).hexdigest()
+        start_event: dict[str, object] = {
+            "request_id": request_id,
+            "tool": "edit_image",
+            "prompt_length": len(params.prompt),
+            "prompt_sha256": prompt_hash,
+            "image_path": params.image_path,
+            "mask_path": params.mask_path,
+            "size": params.size,
+            "quality": params.quality,
+            "background": params.background,
+            "output_format_encoding": params.openai_output_format,
+            "output_compression": params.openai_output_compression,
+            "input_fidelity": params.input_fidelity,
+            "n": params.n,
+            "openai_model": params.openai_model,
+            "output_path": params.output_path,
+            "output_format": params.output_format.value if params.output_format else None,
+        }
+        if settings.log_prompts:
+            start_event["prompt"] = params.prompt
+        log_event("image.edit.start", **start_event)
+
+        provider = registry.get_provider("openai")
+        # edit_image is OpenAI-specific; cast to the concrete type for mypy.
+        from .providers.openai_provider import OpenAIProvider
+
+        assert isinstance(provider, OpenAIProvider)
+
+        result = await provider.edit_image(
+            prompt=params.prompt,
+            image_path=params.image_path,
+            mask_path=params.mask_path,
+            size=params.size,
+            quality=params.quality,
+            background=params.background,
+            openai_output_format=params.openai_output_format,
+            openai_output_compression=params.openai_output_compression,
+            input_fidelity=params.input_fidelity,
+            n=params.n,
+            openai_model=params.openai_model,
+            api_key=params.openai_api_key,
+            output_path=params.output_path,
+        )
+
+        log_event(
+            "image.edit.result",
+            request_id=request_id,
+            success=result.success,
+            provider=result.provider,
+            model=result.model,
+            image_path=str(result.image_path) if result.image_path else None,
+            generation_time_seconds=result.generation_time_seconds,
+            error=result.error,
+        )
+
+        if params.output_format == OutputFormat.JSON:
+            return format_result_json(result)
+        return format_result_markdown(result)
+
+    except ImagenError as e:
+        logger.exception("Image edit failed")
+        log_event("image.edit.error", request_id=request_id, error=str(e))
+        error_response = {"success": False, "error": e.user_message}
+        if params.output_format == OutputFormat.JSON:
+            return json.dumps(error_response, indent=2)
+        return f"## ❌ Image Edit Failed\n\n**Error ({type(e).__name__}):** {e.user_message}"
+
+    except Exception as e:
+        logger.exception("Image edit failed")
+        sanitized = _sanitize_message(str(e))
+        log_event("image.edit.error", request_id=request_id, error=sanitized)
+        error_response = {"success": False, "error": sanitized}
+        if params.output_format == OutputFormat.JSON:
+            return json.dumps(error_response, indent=2)
+        return f"## ❌ Image Edit Failed\n\n**Error:** {sanitized}"
 
 
 @mcp.tool(name="list_providers")
@@ -410,7 +629,6 @@ async def list_providers() -> str:
 
     Use this to understand which provider to choose for your task.
     """
-    configure_logging()
     registry = get_provider_registry()
     return registry.get_comparison()
 
@@ -429,7 +647,6 @@ async def list_conversations(params: ListConversationsInput) -> str:
         List of conversations with metadata.
     """
     try:
-        configure_logging()
         registry = get_provider_registry()
 
         # Ensure providers are initialized to get their conversations
@@ -446,8 +663,7 @@ async def list_conversations(params: ListConversationsInput) -> str:
                     pass
 
         conversations = registry.list_conversations(
-            limit=params.limit or 10,
-            provider_filter=params.provider
+            limit=params.limit or 10, provider_filter=params.provider
         )
 
         if not conversations:
@@ -463,9 +679,14 @@ async def list_conversations(params: ListConversationsInput) -> str:
 
         return "\n".join(lines)
 
+    except ImagenError as e:
+        logger.exception("Failed to list conversations")
+        return f"## ❌ Error\n\nFailed to list conversations ({type(e).__name__}): {e.user_message}"
+
     except Exception as e:
         logger.exception("Failed to list conversations")
-        return f"## ❌ Error\n\nFailed to list conversations: {str(e)}"
+        sanitized = _sanitize_message(str(e))
+        return f"## ❌ Error\n\nFailed to list conversations: {sanitized}"
 
 
 @mcp.tool(name="list_gemini_models")
@@ -481,7 +702,6 @@ async def list_gemini_models() -> str:
     """
     import httpx
 
-    configure_logging()
     settings = get_settings()
 
     if not settings.has_gemini_key():
@@ -489,12 +709,15 @@ async def list_gemini_models() -> str:
             "## ❌ No Gemini API Key\n\nSet GEMINI_API_KEY or GOOGLE_API_KEY environment variable."
         )
 
-    api_key = settings.gemini_api_key
+    api_key: str = settings.gemini_api_key  # type: ignore[assignment]  # guarded by has_gemini_key()
     api_base = "https://generativelanguage.googleapis.com/v1beta"
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(f"{api_base}/models?key={api_key}")
+            response = await client.get(
+                f"{api_base}/models",
+                headers={"x-goog-api-key": api_key},
+            )
             response.raise_for_status()
             data = response.json()
 
@@ -529,9 +752,14 @@ async def list_gemini_models() -> str:
 
         return "\n".join(lines)
 
+    except ImagenError as e:
+        logger.exception("Error listing Gemini models")
+        return f"## ❌ Error\n\nFailed to list models ({type(e).__name__}): {e.user_message}"
+
     except Exception as e:
         logger.exception("Error listing Gemini models")
-        return f"## ❌ Error\n\nFailed to list models: {str(e)}"
+        sanitized = _sanitize_message(str(e))
+        return f"## ❌ Error\n\nFailed to list models: {sanitized}"
 
 
 # ============================
@@ -539,10 +767,8 @@ async def list_gemini_models() -> str:
 # ============================
 
 
-def create_app() -> FastMCP:
-    """Create the MCP server application."""
-    return mcp
-
-
 if __name__ == "__main__":
+    from .config.dotenv import load_dotenv
+
+    load_dotenv(override=False)
     mcp.run()
