@@ -6,4 +6,4 @@ Supports multiple image generation providers:
 - Google Gemini 3 Pro Image (Nano Banana Pro): Best for portraits, products, 4K
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

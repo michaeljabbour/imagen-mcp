@@ -139,13 +139,20 @@ class TestGeminiProvider:
         assert DEFAULT_GEMINI_IMAGE_MODEL == "gemini-3.1-flash-image-preview"
 
     def test_resolve_model_id_handles_aliases(self):
-        """Friendly aliases should resolve to canonical model IDs."""
+        """Friendly aliases should resolve to canonical Nano Banana model IDs."""
         provider = GeminiProvider()
         assert provider._resolve_model_id("nano-banana-2") == "gemini-3.1-flash-image-preview"
         assert provider._resolve_model_id("nano-banana-pro") == "gemini-3-pro-image-preview"
-        assert provider._resolve_model_id("imagen-4") == "imagen-4.0-generate-001"
-        assert provider._resolve_model_id("imagen-4-ultra") == "imagen-4.0-ultra-generate-001"
-        assert provider._resolve_model_id("imagen-4-fast") == "imagen-4.0-fast-generate-001"
+
+    def test_imagen_aliases_no_longer_exist(self):
+        """Imagen 4 aliases were removed in v0.3.0 — they should fall back to the default."""
+        from src.config.constants import DEFAULT_GEMINI_IMAGE_MODEL
+
+        provider = GeminiProvider()
+        # Any imagen-* string is now "unknown" and should fall back
+        assert provider._resolve_model_id("imagen-4") == DEFAULT_GEMINI_IMAGE_MODEL
+        assert provider._resolve_model_id("imagen-4-ultra") == DEFAULT_GEMINI_IMAGE_MODEL
+        assert provider._resolve_model_id("imagen-4-fast") == DEFAULT_GEMINI_IMAGE_MODEL
 
     def test_resolve_model_id_passes_through_canonical_ids(self):
         """Canonical model IDs in GEMINI_MODELS should pass through unchanged."""
@@ -161,24 +168,18 @@ class TestGeminiProvider:
         assert provider._resolve_model_id("bogus-model-xyz") == DEFAULT_GEMINI_IMAGE_MODEL
         assert provider._resolve_model_id(None) == DEFAULT_GEMINI_IMAGE_MODEL
 
-    def test_imagen_models_are_catalogued(self):
-        """All three Imagen 4 variants must be in the registry + flagged as predict-endpoint."""
-        from src.config.constants import (
-            GEMINI_ENDPOINT_PREDICT,
-            GEMINI_IMAGEN_MODELS,
-            GEMINI_MODELS,
-        )
+    def test_imagen_models_removed(self):
+        """Imagen 4 models were removed in v0.3.0 and must not appear in the registry."""
+        from src.config.constants import GEMINI_MODELS
 
-        expected = {
+        for removed_id in (
             "imagen-4.0-generate-001",
             "imagen-4.0-ultra-generate-001",
             "imagen-4.0-fast-generate-001",
-        }
-        assert expected <= GEMINI_IMAGEN_MODELS
-        for model_id in expected:
-            assert model_id in GEMINI_MODELS
-            assert GEMINI_MODELS[model_id]["endpoint"] == GEMINI_ENDPOINT_PREDICT
-            assert GEMINI_MODELS[model_id]["supports_conversational_edit"] is False
+        ):
+            assert removed_id not in GEMINI_MODELS, (
+                f"{removed_id} should have been removed in v0.3.0"
+            )
 
 
 class TestProviderRegistry:

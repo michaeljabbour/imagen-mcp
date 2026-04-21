@@ -19,7 +19,6 @@ from uuid import uuid4
 from ..config.constants import (
     DEFAULT_GEMINI_IMAGE_MODEL,
     GEMINI_ASPECT_RATIOS,
-    GEMINI_IMAGEN_MODELS,
     GEMINI_MAX_REFERENCE_IMAGES,
     GEMINI_MODEL_ALIASES,
     GEMINI_MODELS,
@@ -108,15 +107,14 @@ class GeminiProvider(ImageProvider):
 
     @property
     def display_name(self) -> str:
-        return "Google Gemini / Imagen (Nano Banana 2 default)"
+        return "Google Gemini — Nano Banana 2 (default) / Nano Banana Pro"
 
     # Cached capabilities — constant across all instances, no need to rebuild per access.
-    # These describe the default path (Nano Banana 2 via generateContent).
-    # Imagen 4 routing narrows these (no reference_images, no search grounding,
-    # no multi-turn) and is documented in the provider docstring.
+    # Describes the Nano Banana family (Imagen 4 support was removed in
+    # v0.3.0 — see the module docstring for rationale).
     _capabilities = ProviderCapabilities(
         name="gemini",
-        display_name="Gemini / Imagen (Nano Banana 2, Pro, Imagen 4 family)",
+        display_name="Gemini Nano Banana 2 / Pro",
         supported_sizes=GEMINI_SIZES,
         supported_aspect_ratios=GEMINI_ASPECT_RATIOS,
         max_resolution="4K",
@@ -135,14 +133,12 @@ class GeminiProvider(ImageProvider):
             "High resolution (4K) output",
             "Character consistency with reference images (up to 14)",
             "Real-time data visualization (weather, stocks)",
-            "Multi-turn iterative refinement (Nano Banana only)",
+            "Multi-turn iterative refinement",
             "Complex compositions with multiple subjects",
-            "Batch text-to-image generation (Imagen 4, 1-4 images/call)",
         ],
         not_recommended_for=[
             "Precise text rendering (OpenAI gpt-image-2 is better)",
             "Technical diagrams with detailed labels",
-            "Conversational editing when using Imagen 4 (not supported)",
         ],
     )
 
@@ -259,28 +255,12 @@ class GeminiProvider(ImageProvider):
           (conversational editing, reference images, Google Search
           grounding, Thinking mode on Pro).
 
-        - **Imagen 4** models (``imagen-4.0-*``) use the ``:predict``
-          endpoint via ``client.models.generate_images()``. Text-to-image
-          only — reference images, search grounding, and prior-turn
-          history are ignored with a warning.
+        Imagen 4 (``imagen-4.0-*``) support was removed in v0.3.0 — those
+        models are text-to-image only (no conversational editing, no
+        reference images, no Google Search) and shut down 2026-06-24.
+        Google's own guidance is to migrate to Nano Banana 2 or Pro.
         """
         model_id = self._resolve_model_id(model)
-
-        # Branch on endpoint type. Imagen 4 uses a different SDK method
-        # and response shape, so it gets its own code path.
-        if model_id in GEMINI_IMAGEN_MODELS:
-            return await self._generate_via_imagen(
-                prompt=prompt,
-                model_id=model_id,
-                size=size,
-                aspect_ratio=aspect_ratio,
-                reference_images=reference_images,
-                enable_google_search=enable_google_search,
-                api_key=api_key,
-                output_path=output_path,
-                **kwargs,
-            )
-
         start_time = time.time()
 
         try:
@@ -434,172 +414,6 @@ class GeminiProvider(ImageProvider):
                 success=False,
                 provider=self.name,
                 model=model or DEFAULT_GEMINI_IMAGE_MODEL,
-                prompt=prompt,
-                error=str(e),
-            )
-
-    async def _generate_via_imagen(
-        self,
-        *,
-        prompt: str,
-        model_id: str,
-        size: str | None,
-        aspect_ratio: str | None,
-        reference_images: list[str] | None,
-        enable_google_search: bool,
-        api_key: str | None,
-        output_path: str | None,
-        **kwargs: Any,
-    ) -> ImageResult:
-        """Generate images via the Imagen 4 ``:predict`` endpoint.
-
-        Imagen 4 is text-to-image only and does NOT support:
-        - reference images / image editing
-        - Google Search grounding
-        - conversational multi-turn editing
-        - Thinking mode
-
-        Any unsupported features in the call are logged as a warning and
-        silently ignored so the caller gets an image back rather than a
-        hard failure.  Imagen response shape is
-        ``response.generated_images[i].image.image_bytes``.
-        """
-        start_time = time.time()
-
-        # Warn about ignored features up front so users see why the call
-        # behaves differently than Nano Banana.
-        if reference_images:
-            logger.warning(
-                "Imagen 4 (%s) does not support reference_images; ignoring %d image(s). "
-                "Use nano-banana-2 or nano-banana-pro for reference-guided generation.",
-                model_id,
-                len(reference_images),
-            )
-        if enable_google_search:
-            logger.warning(
-                "Imagen 4 (%s) does not support Google Search grounding; ignoring.",
-                model_id,
-            )
-
-        try:
-            self._ensure_initialized(api_key)
-            assert self._client is not None, "Gemini client not initialized"
-
-            if len(prompt) > MAX_PROMPT_LENGTH:
-                raise ValueError(f"Prompt too long. Maximum {MAX_PROMPT_LENGTH} characters.")
-
-            # Imagen accepts aspect_ratio in the same format as Nano Banana.
-            # Validate here (narrower list than GEMINI_ASPECT_RATIOS if we
-            # want — but the SDK is forgiving, so just default).
-            resolved_aspect = aspect_ratio or "1:1"
-            if resolved_aspect not in GEMINI_ASPECT_RATIOS:
-                logger.warning(
-                    "Unsupported aspect_ratio '%s' for Imagen; defaulting to '1:1'.",
-                    resolved_aspect,
-                )
-                resolved_aspect = "1:1"
-
-            # Imagen uses "1K" / "2K" string sizes like Nano Banana.
-            resolved_size = (size or "2K").upper()
-            if resolved_size not in GEMINI_SIZES:
-                logger.warning(
-                    "Unsupported size '%s' for Imagen; defaulting to '2K'.",
-                    resolved_size,
-                )
-                resolved_size = "2K"
-
-            # Imagen supports n=1..4 in one call.  Pull from kwargs; cap at 4.
-            n = kwargs.get("n") or 1
-            try:
-                n = max(1, min(4, int(n)))
-            except (TypeError, ValueError):
-                n = 1
-
-            person_generation = kwargs.get("person_generation") or "allow_adult"
-
-            config = types.GenerateImagesConfig(
-                number_of_images=n,
-                aspect_ratio=resolved_aspect,
-                image_size=resolved_size,
-                person_generation=person_generation,
-            )
-
-            logger.info(
-                "Generating via Imagen model=%s size=%s aspect_ratio=%s n=%d",
-                model_id,
-                resolved_size,
-                resolved_aspect,
-                n,
-            )
-
-            await self._acquire_rate_limit()
-
-            client = self._client
-
-            async def _do_generate() -> Any:
-                loop = asyncio.get_running_loop()
-                settings = get_settings()
-                return await asyncio.wait_for(
-                    loop.run_in_executor(
-                        None,
-                        partial(
-                            client.models.generate_images,  # type: ignore[union-attr]
-                            model=model_id,
-                            prompt=prompt,
-                            config=config,
-                        ),
-                    ),
-                    timeout=settings.request_timeout,
-                )
-
-            response = await self._retry_with_backoff(_do_generate)
-
-            # Parse response: response.generated_images[i].image.image_bytes
-            generated = getattr(response, "generated_images", None) or []
-            if not generated:
-                raise ValueError("No images returned from Imagen API")
-
-            saved_path: Any = None
-            additional_paths: list[Any] = []
-            for idx, gen in enumerate(generated):
-                try:
-                    img = getattr(gen, "image", None)
-                    image_bytes = getattr(img, "image_bytes", None) if img else None
-                    if not image_bytes:
-                        continue
-                    image_b64 = base64.b64encode(image_bytes).decode()
-                    path = await self._save_image(image_b64, prompt, output_path)
-                    if idx == 0:
-                        saved_path = path
-                    else:
-                        additional_paths.append(path)
-                except Exception as e:
-                    logger.warning("Failed to save Imagen image %d: %s", idx, e)
-
-            if saved_path is None:
-                raise ValueError("No image data found in Imagen API response")
-
-            generation_time = time.time() - start_time
-
-            return ImageResult(
-                success=True,
-                provider=self.name,
-                model=model_id,
-                image_path=saved_path,
-                additional_paths=additional_paths or None,
-                prompt=prompt,
-                size=resolved_size,
-                aspect_ratio=resolved_aspect,
-                timestamp=datetime.now(),
-                generation_time_seconds=generation_time,
-            )
-
-        except Exception as e:
-            logger.exception("Imagen image generation failed")
-            return ImageResult(
-                success=False,
-                provider=self.name,
-                model=model_id,
                 prompt=prompt,
                 error=str(e),
             )

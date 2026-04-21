@@ -107,17 +107,13 @@ class ImageGenerationInput(BaseModel):
         default=None,
         description=(
             "Specific Google image model (Gemini only). Accepts canonical "
-            "API IDs or friendly aliases.\n"
-            "Nano Banana family (conversational, reference images, search):\n"
+            "API IDs or friendly aliases:\n"
             "- 'gemini-3.1-flash-image-preview' / alias 'nano-banana-2' "
             "(default, fast, current default across Gemini/Search/Flow)\n"
             "- 'gemini-3-pro-image-preview' / alias 'nano-banana-pro' "
-            "(highest fidelity, 4K, Thinking mode)\n"
-            "Imagen 4 family (text-to-image only, no editing/references, "
-            "DEPRECATED — shutdown 2026-06-24):\n"
-            "- 'imagen-4.0-generate-001' / alias 'imagen-4' (standard)\n"
-            "- 'imagen-4.0-ultra-generate-001' / alias 'imagen-4-ultra'\n"
-            "- 'imagen-4.0-fast-generate-001' / alias 'imagen-4-fast'"
+            "(highest fidelity, 4K, Thinking mode for precise text rendering)\n"
+            "Both support conversational editing, reference images (up to 14), "
+            "and Google Search grounding."
         ),
     )
 
