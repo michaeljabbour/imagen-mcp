@@ -106,9 +106,18 @@ class ImageGenerationInput(BaseModel):
     gemini_model: str | None = Field(
         default=None,
         description=(
-            "Specific Gemini model to use (Gemini only). Options:\n"
-            "- 'gemini-2.5-flash-preview-image-generation': Gemini 2.5 Flash (default)\n"
-            "- 'gemini-3-pro-image-preview': Nano Banana Pro, highest quality"
+            "Specific Google image model (Gemini only). Accepts canonical "
+            "API IDs or friendly aliases.\n"
+            "Nano Banana family (conversational, reference images, search):\n"
+            "- 'gemini-3.1-flash-image-preview' / alias 'nano-banana-2' "
+            "(default, fast, current default across Gemini/Search/Flow)\n"
+            "- 'gemini-3-pro-image-preview' / alias 'nano-banana-pro' "
+            "(highest fidelity, 4K, Thinking mode)\n"
+            "Imagen 4 family (text-to-image only, no editing/references, "
+            "DEPRECATED — shutdown 2026-06-24):\n"
+            "- 'imagen-4.0-generate-001' / alias 'imagen-4' (standard)\n"
+            "- 'imagen-4.0-ultra-generate-001' / alias 'imagen-4-ultra'\n"
+            "- 'imagen-4.0-fast-generate-001' / alias 'imagen-4-fast'"
         ),
     )
 

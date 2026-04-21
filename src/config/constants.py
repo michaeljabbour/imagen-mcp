@@ -80,25 +80,154 @@ DEFAULT_OPENAI_INPUT_FIDELITY = "high"
 OPENAI_MAX_N = 10
 
 # ============================
-# Google Gemini Constants
+# Google Gemini / Imagen Constants
 # ============================
+#
+# Two distinct model families with different API shapes:
+#
+# - **Nano Banana** (`gemini-*-image*`) — uses the ``generateContent``
+#   endpoint; supports multi-turn editing, reference images (up to 4),
+#   Google Search grounding, and Thinking mode on Pro.
+# - **Imagen 4** (`imagen-4.0-*`) — uses the ``:predict`` endpoint via
+#   ``client.models.generate_images()``; text-to-image only, no
+#   conversational editing, no reference images, no search grounding.
+#
+# Deprecation watch (as of 2026-04-21):
+# - `gemini-2.5-flash-preview-image-generation` shut down Jan 15 2026
+# - `gemini-2.5-flash-image`                     shuts down Oct 2 2026
+# - All three `imagen-4.0-*-001` models          shut down Jun 24 2026
+# Google's migration guidance points at Nano Banana 2 (speed) or Pro
+# (quality) for everything.
 
-# Gemini model identifiers
-GEMINI_MODELS = {
-    "gemini-2.5-flash-preview-image-generation": {
-        "description": "Gemini 2.5 Flash with image generation (GA)",
+# Nano Banana endpoint identifiers
+GEMINI_ENDPOINT_GENERATECONTENT = "generateContent"  # Nano Banana
+GEMINI_ENDPOINT_PREDICT = "predict"  # Imagen 4
+
+GEMINI_MODELS: dict[str, dict[str, object]] = {
+    # --- Nano Banana family (generateContent) -------------------------
+    "gemini-3.1-flash-image-preview": {
+        "marketing_name": "Nano Banana 2",
+        "description": (
+            "Nano Banana 2 (Gemini 3.1 Flash Image) — current default across "
+            "Gemini app / Search / Flow. Fast, efficient, full feature set."
+        ),
+        "endpoint": GEMINI_ENDPOINT_GENERATECONTENT,
         "speed": "fast",
         "quality": "good",
+        "max_resolution": "4K",
+        "supports_conversational_edit": True,
+        "supports_reference_images": True,
+        "supports_google_search": True,
+        "supports_thinking_mode": False,
     },
     "gemini-3-pro-image-preview": {
-        "description": "Gemini 3 Pro image preview (highest quality)",
+        "marketing_name": "Nano Banana Pro",
+        "description": (
+            "Nano Banana Pro (Gemini 3 Pro Image) — highest fidelity, 4K, "
+            "Thinking mode for precise text rendering. Top-3 on LMArena."
+        ),
+        "endpoint": GEMINI_ENDPOINT_GENERATECONTENT,
         "speed": "slow",
         "quality": "best",
+        "max_resolution": "4K",
+        "supports_conversational_edit": True,
+        "supports_reference_images": True,
+        "supports_google_search": True,
+        "supports_thinking_mode": True,
+    },
+    # --- Imagen 4 family (predict) ------------------------------------
+    # DEPRECATED — shutdown 2026-06-24. Text-to-image only.
+    "imagen-4.0-generate-001": {
+        "marketing_name": "Imagen 4",
+        "description": (
+            "Imagen 4 Standard — text-to-image, mid-tier quality. "
+            "DEPRECATED: shutdown 2026-06-24; migrate to Nano Banana 2 or Pro."
+        ),
+        "endpoint": GEMINI_ENDPOINT_PREDICT,
+        "speed": "standard",
+        "quality": "good",
+        "max_resolution": "2K",
+        "supports_conversational_edit": False,
+        "supports_reference_images": False,
+        "supports_google_search": False,
+        "supports_thinking_mode": False,
+        "deprecated": True,
+        "shutdown_date": "2026-06-24",
+    },
+    "imagen-4.0-ultra-generate-001": {
+        "marketing_name": "Imagen 4 Ultra",
+        "description": (
+            "Imagen 4 Ultra — highest quality text-to-image. "
+            "DEPRECATED: shutdown 2026-06-24; migrate to Nano Banana Pro."
+        ),
+        "endpoint": GEMINI_ENDPOINT_PREDICT,
+        "speed": "slow",
+        "quality": "best",
+        "max_resolution": "2K",
+        "supports_conversational_edit": False,
+        "supports_reference_images": False,
+        "supports_google_search": False,
+        "supports_thinking_mode": False,
+        "deprecated": True,
+        "shutdown_date": "2026-06-24",
+    },
+    "imagen-4.0-fast-generate-001": {
+        "marketing_name": "Imagen 4 Fast",
+        "description": (
+            "Imagen 4 Fast — fastest text-to-image, 1K. "
+            "DEPRECATED: shutdown 2026-06-24; migrate to Nano Banana 2."
+        ),
+        "endpoint": GEMINI_ENDPOINT_PREDICT,
+        "speed": "very fast",
+        "quality": "good",
+        "max_resolution": "1K",
+        "supports_conversational_edit": False,
+        "supports_reference_images": False,
+        "supports_google_search": False,
+        "supports_thinking_mode": False,
+        "deprecated": True,
+        "shutdown_date": "2026-06-24",
+    },
+    # --- Legacy (kept for backward compat; shut down or soon-to-be) ---
+    "gemini-2.5-flash-preview-image-generation": {
+        "marketing_name": "Gemini 2.5 Flash Image (legacy)",
+        "description": ("LEGACY — retired 2026-01-15. Prefer gemini-3.1-flash-image-preview."),
+        "endpoint": GEMINI_ENDPOINT_GENERATECONTENT,
+        "speed": "fast",
+        "quality": "good",
+        "max_resolution": "4K",
+        "supports_conversational_edit": True,
+        "supports_reference_images": True,
+        "supports_google_search": True,
+        "supports_thinking_mode": False,
+        "deprecated": True,
+        "shutdown_date": "2026-01-15",
     },
 }
 
-# Default Gemini model for image generation
-DEFAULT_GEMINI_IMAGE_MODEL = "gemini-2.5-flash-preview-image-generation"
+# Friendly aliases — users can pass these human-readable names and we map
+# them to canonical API identifiers.  Extend as new marketing names land.
+GEMINI_MODEL_ALIASES: dict[str, str] = {
+    "nano-banana-2": "gemini-3.1-flash-image-preview",
+    "nano-banana-pro": "gemini-3-pro-image-preview",
+    "imagen-4": "imagen-4.0-generate-001",
+    "imagen-4-ultra": "imagen-4.0-ultra-generate-001",
+    "imagen-4-fast": "imagen-4.0-fast-generate-001",
+}
+
+# Fast lookups
+GEMINI_IMAGEN_MODELS: set[str] = {
+    mid for mid, meta in GEMINI_MODELS.items() if meta.get("endpoint") == GEMINI_ENDPOINT_PREDICT
+}
+GEMINI_NANO_BANANA_MODELS: set[str] = {
+    mid
+    for mid, meta in GEMINI_MODELS.items()
+    if meta.get("endpoint") == GEMINI_ENDPOINT_GENERATECONTENT and not meta.get("deprecated", False)
+}
+
+# Default Gemini model — Nano Banana 2, which Google uses across their
+# own surfaces (Gemini app, Search, Flow).
+DEFAULT_GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image-preview"
 
 # Gemini supports 10 aspect ratios
 GEMINI_ASPECT_RATIOS = [

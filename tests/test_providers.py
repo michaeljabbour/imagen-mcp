@@ -132,6 +132,54 @@ class TestGeminiProvider:
         assert "1:1" in caps.supported_aspect_ratios
         assert "16:9" in caps.supported_aspect_ratios
 
+    def test_default_is_nano_banana_2(self):
+        """Default Gemini model should be Nano Banana 2 (current Google default)."""
+        from src.config.constants import DEFAULT_GEMINI_IMAGE_MODEL
+
+        assert DEFAULT_GEMINI_IMAGE_MODEL == "gemini-3.1-flash-image-preview"
+
+    def test_resolve_model_id_handles_aliases(self):
+        """Friendly aliases should resolve to canonical model IDs."""
+        provider = GeminiProvider()
+        assert provider._resolve_model_id("nano-banana-2") == "gemini-3.1-flash-image-preview"
+        assert provider._resolve_model_id("nano-banana-pro") == "gemini-3-pro-image-preview"
+        assert provider._resolve_model_id("imagen-4") == "imagen-4.0-generate-001"
+        assert provider._resolve_model_id("imagen-4-ultra") == "imagen-4.0-ultra-generate-001"
+        assert provider._resolve_model_id("imagen-4-fast") == "imagen-4.0-fast-generate-001"
+
+    def test_resolve_model_id_passes_through_canonical_ids(self):
+        """Canonical model IDs in GEMINI_MODELS should pass through unchanged."""
+        provider = GeminiProvider()
+        canonical = "gemini-3-pro-image-preview"
+        assert provider._resolve_model_id(canonical) == canonical
+
+    def test_resolve_model_id_falls_back_on_unknown(self):
+        """Unknown model names should warn and fall back to the default."""
+        from src.config.constants import DEFAULT_GEMINI_IMAGE_MODEL
+
+        provider = GeminiProvider()
+        assert provider._resolve_model_id("bogus-model-xyz") == DEFAULT_GEMINI_IMAGE_MODEL
+        assert provider._resolve_model_id(None) == DEFAULT_GEMINI_IMAGE_MODEL
+
+    def test_imagen_models_are_catalogued(self):
+        """All three Imagen 4 variants must be in the registry + flagged as predict-endpoint."""
+        from src.config.constants import (
+            GEMINI_ENDPOINT_PREDICT,
+            GEMINI_IMAGEN_MODELS,
+            GEMINI_MODELS,
+        )
+
+        expected = {
+            "imagen-4.0-generate-001",
+            "imagen-4.0-ultra-generate-001",
+            "imagen-4.0-fast-generate-001",
+        }
+        assert expected <= GEMINI_IMAGEN_MODELS
+        for model_id in expected:
+            assert model_id in GEMINI_MODELS
+            assert GEMINI_MODELS[model_id]["endpoint"] == GEMINI_ENDPOINT_PREDICT
+            assert GEMINI_MODELS[model_id]["supports_conversational_edit"] is False
+
 
 class TestProviderRegistry:
     """Tests for provider registry."""

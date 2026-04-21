@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "imagen-mcp"
-version = "4.0.0"
+version = "0.2.0"
 authors = [
   { name="Michael Jabbour", email="michael@example.com" },
 ]
