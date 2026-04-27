@@ -90,3 +90,6 @@ claude_desktop_config.json.local
 temp/
 *.png.local
 test_images/
+
+# Amplifier project-context coordination files (per-session, not shared)
+project-context/
