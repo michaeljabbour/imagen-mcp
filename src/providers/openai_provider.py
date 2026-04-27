@@ -27,7 +27,7 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -192,10 +192,10 @@ class OpenAIProvider(ImageProvider):
             else:
                 response = await client.request(method, url, headers=headers, json=json_data)
             response.raise_for_status()
-            return dict(response.json())
+            return cast("dict[str, Any]", response.json())
 
         try:
-            return await self._retry_with_backoff(_do_request)
+            return cast("dict[str, Any]", await self._retry_with_backoff(_do_request))
         except httpx.HTTPStatusError as e:
             error_detail = e.response.text
             raise ValueError(f"OpenAI API error ({e.response.status_code}): {error_detail}") from e
@@ -229,7 +229,8 @@ class OpenAIProvider(ImageProvider):
             "model": model,
             "prompt": prompt,
             "size": size,
-            "response_format": "b64_json",  # we save to disk locally
+            # gpt-image-2 returns b64_json in data[] by default;
+            # the legacy "response_format" param is not supported.
         }
         if quality is not None:
             payload["quality"] = quality
@@ -841,7 +842,8 @@ class OpenAIProvider(ImageProvider):
                 "prompt": prompt,
                 "size": size,
                 "input_fidelity": input_fidelity,
-                "response_format": "b64_json",
+                # gpt-image-2 returns b64_json in data[] by default;
+                # the legacy "response_format" param is not supported.
             }
             if quality is not None:
                 form_data["quality"] = quality

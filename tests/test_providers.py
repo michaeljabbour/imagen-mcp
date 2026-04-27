@@ -208,6 +208,37 @@ class TestProviderRegistry:
         with pytest.raises(ValueError, match="Unknown provider"):
             registry.get_provider("unknown")
 
+    def test_request_scoped_openai_key_enables_provider(self, monkeypatch):
+        """Per-call OpenAI keys should count for selection without polluting the cache."""
+        from src.config.settings import get_settings
+
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        get_settings.cache_clear()
+
+        try:
+            registry = ProviderRegistry()
+
+            assert registry.is_provider_available("openai") is False
+            assert registry.is_provider_available("openai", api_key="request-key") is True
+            assert registry.list_providers(openai_api_key="request-key") == ["openai"]
+
+            provider, rec = registry.get_provider_for_prompt(
+                "Create a poster with headline text",
+                explicit_provider="openai",
+                openai_api_key="request-key",
+            )
+
+            assert provider.name == "openai"
+            assert rec.provider == "openai"
+
+            # Request-scoped credentials must not make future no-key lookups succeed.
+            with pytest.raises(ValueError, match="OpenAI provider not available"):
+                registry.get_provider("openai")
+        finally:
+            get_settings.cache_clear()
+
     def test_provider_info(self):
         """Registry should return provider info."""
         registry = ProviderRegistry()

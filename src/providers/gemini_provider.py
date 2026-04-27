@@ -41,9 +41,9 @@ def _import_dependencies() -> None:
     global genai, types, Image
     if genai is None:
         try:
-            from google import genai as _genai  # type: ignore[attr-defined]
-            from google.genai import types as _types  # type: ignore[import-untyped]
-            from PIL import Image as _Image  # type: ignore[import-untyped]
+            from google import genai as _genai
+            from google.genai import types as _types
+            from PIL import Image as _Image
 
             genai = _genai
             types = _types
@@ -346,7 +346,7 @@ class GeminiProvider(ImageProvider):
                         loop.run_in_executor(
                             None,
                             partial(
-                                client.models.generate_content,  # type: ignore[union-attr]
+                                client.models.generate_content,
                                 model=model_id,
                                 contents=contents,
                                 config=config,

@@ -43,12 +43,13 @@ class ProviderRegistry:
         self._selector = ProviderSelector()
         self._settings = get_settings()
 
-    def get_provider(self, name: str) -> ImageProvider:
+    def get_provider(self, name: str, *, api_key: str | None = None) -> ImageProvider:
         """
         Get a provider by name.
 
         Args:
             name: Provider name ("openai" or "gemini")
+            api_key: Optional request-scoped API key override
 
         Returns:
             ImageProvider instance
@@ -58,27 +59,31 @@ class ProviderRegistry:
         """
         name = name.lower()
 
+        if name not in self.list_all_providers():
+            raise ValueError(f"Unknown provider: {name}. Available: openai, gemini")
+
+        if not self.is_provider_available(name, api_key=api_key):
+            env_var = "OPENAI_API_KEY" if name == "openai" else "GEMINI_API_KEY"
+            provider_label = "OpenAI" if name == "openai" else "Gemini"
+            raise ValueError(
+                f"{provider_label} provider not available. Set {env_var} environment "
+                "variable or provide an API key override."
+            )
+
         # Return cached instance if available
         if name in self._providers:
             return self._providers[name]
 
         # Create new instance
         if name == "openai":
-            if not self._settings.has_openai_key():
-                raise ValueError(
-                    "OpenAI provider not available. Set OPENAI_API_KEY environment variable."
-                )
-            provider: ImageProvider = OpenAIProvider()
+            provider: ImageProvider = OpenAIProvider(api_key=api_key)
         elif name == "gemini":
-            if not self._settings.has_gemini_key():
-                raise ValueError(
-                    "Gemini provider not available. Set GEMINI_API_KEY environment variable."
-                )
-            provider = GeminiProvider()
-        else:
-            raise ValueError(f"Unknown provider: {name}. Available: openai, gemini")
+            provider = GeminiProvider(api_key=api_key)
 
-        self._providers[name] = provider
+        # Only cache providers backed by environment configuration. Request-scoped
+        # API keys should not become implicit credentials for later requests.
+        if api_key is None:
+            self._providers[name] = provider
         return provider
 
     def get_provider_for_prompt(
@@ -89,6 +94,8 @@ class ProviderRegistry:
         reference_images: list[str] | None = None,
         enable_google_search: bool = False,
         explicit_provider: str | None = None,
+        openai_api_key: str | None = None,
+        gemini_api_key: str | None = None,
     ) -> tuple[ImageProvider, ProviderRecommendation]:
         """
         Get the best provider for a given prompt.
@@ -102,11 +109,16 @@ class ProviderRegistry:
             reference_images: Reference images (requires Gemini)
             enable_google_search: Enable Google Search grounding
             explicit_provider: User-specified provider override
+            openai_api_key: Optional request-scoped OpenAI API key
+            gemini_api_key: Optional request-scoped Gemini API key
 
         Returns:
             Tuple of (ImageProvider, ProviderRecommendation)
         """
-        available = self.list_providers()
+        available = self.list_providers(
+            openai_api_key=openai_api_key,
+            gemini_api_key=gemini_api_key,
+        )
         # Get recommendation
         recommendation = self._selector.suggest_provider(
             prompt,
@@ -118,27 +130,40 @@ class ProviderRegistry:
         )
 
         # Get the provider
-        provider = self.get_provider(recommendation.provider)
+        provider_api_key = openai_api_key if recommendation.provider == "openai" else gemini_api_key
+        provider = self.get_provider(recommendation.provider, api_key=provider_api_key)
 
         return provider, recommendation
 
-    def list_providers(self) -> list[str]:
+    def list_providers(
+        self,
+        *,
+        openai_api_key: str | None = None,
+        gemini_api_key: str | None = None,
+    ) -> list[str]:
         """List all available provider names (with API keys and dependencies)."""
-        return [p for p in self.list_all_providers() if self.is_provider_available(p)]
+        return [
+            p
+            for p in self.list_all_providers()
+            if self.is_provider_available(
+                p,
+                api_key=openai_api_key if p == "openai" else gemini_api_key,
+            )
+        ]
 
     def list_all_providers(self) -> list[str]:
         """List all supported provider names (including unavailable)."""
         return ["openai", "gemini"]
 
-    def is_provider_available(self, name: str) -> bool:
+    def is_provider_available(self, name: str, *, api_key: str | None = None) -> bool:
         """Check if a provider is available (has API key and dependencies)."""
         name = name.lower()
         if name == "openai":
-            if not self._settings.has_openai_key():
+            if not (api_key or self._settings.has_openai_key()):
                 return False
             return _module_available("httpx")
         elif name == "gemini":
-            if not self._settings.has_gemini_key():
+            if not (api_key or self._settings.has_gemini_key()):
                 return False
             return _module_available("google.genai") and _module_available("PIL")
         return False

@@ -46,7 +46,14 @@ class Settings:
         # Support both GEMINI_API_KEY and GOOGLE_API_KEY for Gemini
         gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         log_dir = os.getenv("IMAGEN_MCP_LOG_DIR") or os.getenv("LOG_DIR")
-        log_level = os.getenv("IMAGEN_MCP_LOG_LEVEL") or os.getenv("LOG_LEVEL", "INFO")
+        log_level = os.getenv("IMAGEN_MCP_LOG_LEVEL") or os.getenv("LOG_LEVEL") or "INFO"
+        log_max_bytes = (
+            os.getenv("IMAGEN_MCP_LOG_MAX_BYTES") or os.getenv("LOG_MAX_BYTES") or "5242880"
+        )
+        log_backup_count = (
+            os.getenv("IMAGEN_MCP_LOG_BACKUP_COUNT") or os.getenv("LOG_BACKUP_COUNT") or "3"
+        )
+        log_prompts = os.getenv("IMAGEN_MCP_LOG_PROMPTS") or os.getenv("LOG_PROMPTS") or "false"
 
         return cls(
             openai_api_key=os.getenv("OPENAI_API_KEY"),
@@ -63,16 +70,9 @@ class Settings:
             output_dir=os.getenv("OUTPUT_DIR"),
             log_dir=log_dir,
             log_level=log_level,
-            log_max_bytes=int(
-                os.getenv("IMAGEN_MCP_LOG_MAX_BYTES") or os.getenv("LOG_MAX_BYTES", "5242880")
-            ),
-            log_backup_count=int(
-                os.getenv("IMAGEN_MCP_LOG_BACKUP_COUNT") or os.getenv("LOG_BACKUP_COUNT", "3")
-            ),
-            log_prompts=(
-                os.getenv("IMAGEN_MCP_LOG_PROMPTS") or os.getenv("LOG_PROMPTS", "false")
-            ).lower()
-            == "true",
+            log_max_bytes=int(log_max_bytes),
+            log_backup_count=int(log_backup_count),
+            log_prompts=log_prompts.lower() == "true",
         )
 
     def get_openai_api_key(self, provided_key: str | None = None) -> str:

@@ -262,6 +262,8 @@ async def generate_image(params: ImageGenerationInput) -> str:
             reference_images=params.reference_images,
             enable_google_search=params.enable_google_search or False,
             explicit_provider=explicit_provider,
+            openai_api_key=params.openai_api_key,
+            gemini_api_key=params.gemini_api_key,
         )
 
         logger.info(
@@ -424,6 +426,8 @@ async def conversational_image(params: ConversationalImageInput) -> str:
             reference_images=params.reference_images,
             enable_google_search=params.enable_google_search or False,
             explicit_provider=explicit_provider,
+            openai_api_key=params.openai_api_key,
+            gemini_api_key=params.gemini_api_key,
         )
         log_event(
             "image.provider.selected",
@@ -532,11 +536,12 @@ async def edit_image(params: EditImageInput) -> str:
         registry = get_provider_registry()
         settings = get_settings()
 
-        if not registry.is_provider_available("openai"):
+        if not registry.is_provider_available("openai", api_key=params.openai_api_key):
             msg = (
                 "## ❌ edit_image Unavailable\n\n"
                 "OpenAI provider is not configured. "
-                "Set `OPENAI_API_KEY` to enable image editing via gpt-image-2."
+                "Set `OPENAI_API_KEY` or pass `openai_api_key` to enable image editing "
+                "via gpt-image-2."
             )
             return msg
 
@@ -563,7 +568,7 @@ async def edit_image(params: EditImageInput) -> str:
             start_event["prompt"] = params.prompt
         log_event("image.edit.start", **start_event)
 
-        provider = registry.get_provider("openai")
+        provider = registry.get_provider("openai", api_key=params.openai_api_key)
         # edit_image is OpenAI-specific; cast to the concrete type for mypy.
         from .providers.openai_provider import OpenAIProvider
 
