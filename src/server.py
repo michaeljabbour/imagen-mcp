@@ -12,20 +12,24 @@ or allows explicit provider selection.
 
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from hashlib import sha256
 from typing import Any
 from uuid import uuid4
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.types import ToolAnnotations
 
+from .config.pricing import estimate_generation_cost, format_cost_estimate
 from .config.settings import get_settings
 from .exceptions import ImagenError, _sanitize_message
 from .models.input_models import (
     ConversationalImageInput,
+    CostEstimateInput,
     EditImageInput,
     ImageGenerationInput,
+    ImageRefinementElicitation,
     ListConversationsInput,
     OutputFormat,
     Provider,
@@ -37,13 +41,64 @@ from .services.logging_config import configure_logging, log_event
 logger = logging.getLogger(__name__)
 
 
+async def _report_progress(
+    ctx: Context | None, progress: float, total: float, message: str
+) -> None:
+    """Report progress to the client if a context is available.
+
+    No-ops safely when running without a live MCP session (e.g. direct
+    unit-test calls) or when the client did not supply a progress token.
+    """
+    if ctx is None:
+        return
+    try:
+        await ctx.report_progress(progress, total, message)
+    except Exception:  # pragma: no cover - depends on live client capability
+        logger.debug("Progress reporting unavailable; continuing", exc_info=True)
+
+
+async def _elicit_refinement(ctx: Context | None, prompt: str) -> str | None:
+    """Ask the client for structured refinement via MCP Elicitation.
+
+    Returns an enriched prompt string when the user accepts, or ``None``
+    when elicitation is unavailable (no context / client doesn't support
+    it) or the user declines — in which case the caller falls back to the
+    text-based dialogue questions.
+    """
+    if ctx is None:
+        return None
+    try:
+        result = await ctx.elicit(
+            message="Add a little detail to refine your image (optional).",
+            schema=ImageRefinementElicitation,
+        )
+    except Exception:  # pragma: no cover - depends on live client capability
+        logger.debug("Elicitation unavailable; falling back to dialogue", exc_info=True)
+        return None
+
+    if result.action != "accept" or result.data is None:
+        return None
+
+    extras: list[str] = []
+    if result.data.style:
+        extras.append(f"style: {result.data.style}")
+    if result.data.mood:
+        extras.append(f"mood: {result.data.mood}")
+    if result.data.additional_details:
+        extras.append(result.data.additional_details)
+
+    if not extras:
+        return prompt
+    return f"{prompt} ({', '.join(extras)})"
+
+
 # ============================
 # Lifespan (startup / shutdown)
 # ============================
 
 
 @asynccontextmanager
-async def _lifespan(_app: FastMCP) -> AsyncIterator[None]:
+async def _lifespan(_app: FastMCP) -> AsyncGenerator[None, None]:
     """Manage server-wide resources across the process lifetime."""
     # --- startup ---
     configure_logging()
@@ -191,8 +246,17 @@ def format_result_json(
 # ============================
 
 
-@mcp.tool(name="generate_image")
-async def generate_image(params: ImageGenerationInput) -> str:
+@mcp.tool(
+    name="generate_image",
+    annotations=ToolAnnotations(
+        title="Generate Image",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=True,  # makes external API calls
+    ),
+)
+async def generate_image(params: ImageGenerationInput, ctx: Context | None = None) -> str:
     """Generate an image using the best available provider.
 
     **Automatic Provider Selection:**
@@ -250,6 +314,8 @@ async def generate_image(params: ImageGenerationInput) -> str:
             start_event["prompt"] = params.prompt
         log_event("image.generate.start", **start_event)
 
+        await _report_progress(ctx, 5, 100, "Selecting provider...")
+
         # Determine explicit provider if specified
         explicit_provider = None
         if params.provider and params.provider != Provider.AUTO:
@@ -280,6 +346,8 @@ async def generate_image(params: ImageGenerationInput) -> str:
             alternative_reasoning=recommendation.alternative_reasoning,
             detected_image_type=recommendation.detected_image_type,
         )
+
+        await _report_progress(ctx, 20, 100, f"Generating with {recommendation.provider}...")
 
         # Generate image — forward OpenAI gpt-image-2 params only when OpenAI is
         # the selected provider to avoid polluting Gemini's signature.
@@ -322,6 +390,8 @@ async def generate_image(params: ImageGenerationInput) -> str:
             error=result.error,
         )
 
+        await _report_progress(ctx, 100, 100, "Done")
+
         # Format response
         if params.output_format == OutputFormat.JSON:
             return format_result_json(result, recommendation)
@@ -356,8 +426,17 @@ async def generate_image(params: ImageGenerationInput) -> str:
             return f"## ❌ Image Generation Failed\n\n**Error:** {sanitized}"
 
 
-@mcp.tool(name="conversational_image")
-async def conversational_image(params: ConversationalImageInput) -> str:
+@mcp.tool(
+    name="conversational_image",
+    annotations=ToolAnnotations(
+        title="Conversational Image",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=True,
+    ),
+)
+async def conversational_image(params: ConversationalImageInput, ctx: Context | None = None) -> str:
     """Generate images conversationally with iterative refinement.
 
     **USE THIS TOOL when:**
@@ -444,19 +523,32 @@ async def conversational_image(params: ConversationalImageInput) -> str:
         dialogue = DialogueSystem(mode=params.dialogue_mode or "guided")
         dialogue_result = dialogue.analyze(params.prompt)
 
-        # If dialogue needs more info, return questions (unless skip_dialogue)
+        # If dialogue needs more info, gather it (unless skip_dialogue).
+        effective_prompt = params.prompt
         if not params.skip_dialogue and not dialogue_result.should_generate:
+            # Phase 9: prefer native MCP Elicitation when the client supports
+            # it — the client renders proper form fields. Fall back to the
+            # text-based dialogue questions when elicitation is unavailable or
+            # the user declines.
+            elicited = await _elicit_refinement(ctx, params.prompt)
+            if elicited is None:
+                log_event(
+                    "image.conversation.dialogue",
+                    request_id=request_id,
+                    questions_count=len(dialogue_result.questions),
+                    detected_intent=dialogue_result.detected_intent,
+                )
+                return create_dialogue_response(dialogue_result, recommendation.provider)
+            effective_prompt = elicited
             log_event(
-                "image.conversation.dialogue",
+                "image.conversation.elicited",
                 request_id=request_id,
-                questions_count=len(dialogue_result.questions),
-                detected_intent=dialogue_result.detected_intent,
+                prompt_length=len(effective_prompt),
             )
-            return create_dialogue_response(dialogue_result, recommendation.provider)
 
         # Generate the image
         result = await provider.generate_image(
-            params.prompt,
+            effective_prompt,
             size=params.size,
             aspect_ratio=params.aspect_ratio,
             conversation_id=params.conversation_id,
@@ -502,7 +594,16 @@ async def conversational_image(params: ConversationalImageInput) -> str:
         return f"## ❌ Generation Failed\n\n**Error:** {sanitized}"
 
 
-@mcp.tool(name="edit_image")
+@mcp.tool(
+    name="edit_image",
+    annotations=ToolAnnotations(
+        title="Edit Image",
+        readOnlyHint=False,
+        destructiveHint=False,  # writes a new file; never overwrites the source
+        idempotentHint=False,
+        openWorldHint=True,
+    ),
+)
 async def edit_image(params: EditImageInput) -> str:
     """Edit an existing image using OpenAI gpt-image-2's /images/edits endpoint.
 
@@ -623,7 +724,15 @@ async def edit_image(params: EditImageInput) -> str:
         return f"## ❌ Image Edit Failed\n\n**Error:** {sanitized}"
 
 
-@mcp.tool(name="list_providers")
+@mcp.tool(
+    name="list_providers",
+    annotations=ToolAnnotations(
+        title="List Providers",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False,
+    ),
+)
 async def list_providers() -> str:
     """List available image generation providers and their capabilities.
 
@@ -638,7 +747,15 @@ async def list_providers() -> str:
     return registry.get_comparison()
 
 
-@mcp.tool(name="list_conversations")
+@mcp.tool(
+    name="list_conversations",
+    annotations=ToolAnnotations(
+        title="List Conversations",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False,
+    ),
+)
 async def list_conversations(params: ListConversationsInput) -> str:
     """List saved image generation conversations.
 
@@ -694,7 +811,15 @@ async def list_conversations(params: ListConversationsInput) -> str:
         return f"## ❌ Error\n\nFailed to list conversations: {sanitized}"
 
 
-@mcp.tool(name="list_gemini_models")
+@mcp.tool(
+    name="list_gemini_models",
+    annotations=ToolAnnotations(
+        title="List Gemini Models",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=True,  # queries the Gemini API
+    ),
+)
 async def list_gemini_models() -> str:
     """List available Gemini models that support image generation.
 
@@ -767,13 +892,135 @@ async def list_gemini_models() -> str:
         return f"## ❌ Error\n\nFailed to list models: {sanitized}"
 
 
+@mcp.tool(
+    name="estimate_cost",
+    annotations=ToolAnnotations(
+        title="Estimate Cost",
+        readOnlyHint=True,
+        idempotentHint=True,
+        openWorldHint=False,  # local pricing table; no network call
+    ),
+)
+async def estimate_cost(params: CostEstimateInput) -> str:
+    """Estimate the cost of generating an image *without* generating it.
+
+    Runs the same provider auto-selection as ``generate_image`` (unless you
+    pin a provider) and looks up an approximate price from a local pricing
+    table. Useful for comparing providers/qualities before committing.
+
+    The figure is a ballpark — real cost depends on live provider pricing
+    and, for OpenAI, actual image output tokens.
+
+    Args:
+        params: Prompt plus optional provider/quality/size/n.
+
+    Returns:
+        A formatted cost estimate.
+    """
+    try:
+        registry = get_provider_registry()
+
+        explicit_provider = None
+        if params.provider and params.provider != Provider.AUTO:
+            explicit_provider = params.provider.value
+
+        # Resolve which provider would be used (auto-selection or explicit).
+        try:
+            _, recommendation = registry.get_provider_for_prompt(
+                params.prompt,
+                size=params.size,
+                explicit_provider=explicit_provider,
+            )
+            provider_name = recommendation.provider
+        except Exception:
+            # No provider configured — still estimate for the requested/auto
+            # provider so callers get a number without needing API keys.
+            provider_name = explicit_provider or "openai"
+
+        est = estimate_generation_cost(
+            provider_name,
+            quality=params.quality,
+            size=params.size,
+            n=params.n,
+        )
+
+        log_event(
+            "image.cost.estimate",
+            provider=est.provider,
+            quality=est.quality,
+            size=est.size,
+            n=est.n,
+            total_usd=est.total_usd,
+        )
+
+        if params.output_format == OutputFormat.JSON:
+            return json.dumps(
+                {
+                    "provider": est.provider,
+                    "model": est.model,
+                    "quality": est.quality,
+                    "size": est.size,
+                    "n": est.n,
+                    "per_image_usd": est.per_image_usd,
+                    "total_usd": est.total_usd,
+                    "approximate": est.approximate,
+                    "note": est.note,
+                },
+                indent=2,
+            )
+        return format_cost_estimate(est)
+
+    except Exception as e:
+        logger.exception("Cost estimation failed")
+        sanitized = _sanitize_message(str(e))
+        return f"## ❌ Cost Estimation Failed\n\n**Error:** {sanitized}"
+
+
 # ============================
 # Server Entry Point
 # ============================
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Console-script entry point.
+
+    Transport is selected via ``IMAGEN_MCP_TRANSPORT`` (default ``stdio``):
+
+    - ``stdio``           — local subprocess transport (Claude Desktop default)
+    - ``streamable-http`` — HTTP service; honors ``IMAGEN_MCP_HOST`` /
+      ``IMAGEN_MCP_PORT`` (default ``127.0.0.1:8000``)
+    - ``sse``             — legacy Server-Sent Events transport
+
+    Streamable HTTP (MCP spec 2025-03-26) lets the server run as a web
+    service that multiple clients can connect to, behind load balancers
+    and proxies, instead of only as a local stdio subprocess.
+    """
+    import os
+
     from .config.dotenv import load_dotenv
 
     load_dotenv(override=False)
-    mcp.run()
+
+    transport = os.getenv("IMAGEN_MCP_TRANSPORT", "stdio").strip().lower()
+
+    if transport in ("streamable-http", "http", "sse"):
+        # Host/port live on FastMCP.settings; only override when provided so
+        # the SDK defaults (127.0.0.1:8000) still apply otherwise.
+        host = os.getenv("IMAGEN_MCP_HOST")
+        port = os.getenv("IMAGEN_MCP_PORT")
+        if host:
+            mcp.settings.host = host
+        if port:
+            mcp.settings.port = int(port)
+        if transport == "sse":
+            logger.info("Starting imagen-mcp over sse transport")
+            mcp.run(transport="sse")
+        else:
+            logger.info("Starting imagen-mcp over streamable-http transport")
+            mcp.run(transport="streamable-http")
+    else:
+        mcp.run()
+
+
+if __name__ == "__main__":
+    main()

@@ -66,6 +66,63 @@ MCP tool handlers**. The provider APIs have moved significantly since the codeba
 
 ---
 
+## Implementation Status (v0.3.x)
+
+Phases 0–5 landed earlier. Phases 6–10 are now implemented, with these
+deliberate deviations from the original plan:
+
+**Phase 6 — Testing & CI/CD — done.**
+- `tests/conftest.py` with autouse `fake_env` (fixes import-order provider
+  availability), plus shared fixtures.
+- New test modules: `test_dotenv`, `test_rate_limiter`, `test_logging_config`,
+  `test_pricing`, `test_handlers` (all MCP tools), `test_openai_provider`
+  (generate + edit), `test_gemini_generate` (mocked SDK), `test_list_models_and_main`.
+- Coverage gate at **80%** (`[tool.coverage.report] fail_under`); currently ~82%.
+  CI runs `cli.py` out of coverage (interactive, exercised manually).
+- `.pre-commit-config.yaml` (ruff + ruff-format + mypy).
+- CI rewritten to uv: ruff format check → ruff lint → mypy → pytest+coverage.
+
+**Phase 7 — Dependency & packaging — done.**
+- Dev deps moved to `[project.optional-dependencies] dev`; `dev-requirements.txt`
+  removed; `requirements.txt` is now runtime-only and points at pyproject.
+- `src/py.typed` added + `[tool.setuptools.package-data]`; explicit
+  `[tool.setuptools.packages.find] include = ["src*"]` (flat layout had `src`
+  AND `tests` as top-level packages, which broke `pip install`/`uv sync`).
+- Pins refreshed (httpx>=0.28, mcp>=1.26, etc.). `types-requests` dropped.
+
+**Phase 8 — FastMCP — reframed (not a standalone 3.0 swap).**
+- The code uses the FastMCP bundled in the `mcp` SDK
+  (`from mcp.server.fastmcp import FastMCP`); the standalone `fastmcp` package
+  was never imported and has been removed from deps. mcp 1.26 already provides
+  tool annotations, structured output, `ctx.elicit()`, `ctx.report_progress()`,
+  and streamable-http transport — so a risky package swap was unnecessary.
+- ⚠️ Consequence: `@mcp.tool(task=True)` (MCP Tasks) is **not** available in the
+  bundled FastMCP — it remains a future item gated on standalone fastmcp 3.0.
+
+**Phase 9 — MCP protocol features — additive.**
+- Tool annotations on all 7 tools (readOnly/destructive/idempotent/openWorld).
+- `ctx.report_progress()` wired into `generate_image` (no-ops without a live
+  client/progress token).
+- `ctx.elicit()` added to `conversational_image` as an enhancement that falls
+  back to the existing `services/dialogue.py` text questions when the client
+  doesn't support elicitation or the user declines. `dialogue.py` is retained.
+- Streamable HTTP transport selectable via `IMAGEN_MCP_TRANSPORT`.
+- Output schemas were intentionally **not** adopted: tools keep returning
+  human-readable markdown/JSON to avoid regressing the UX.
+
+**Phase 10 — New features.**
+- `estimate_cost` tool + local `src/config/pricing.py` table (approximate).
+- Batch: OpenAI `n` (1–10) already populates `additional_paths`; Gemini now
+  persists any extra images returned in a single response. ⚠️ True N-call
+  fan-out batch for Gemini is **not** implemented (Nano Banana returns one
+  image per `generateContent` call).
+- Image editing, output-format options, and the prompt-enhancement toggle were
+  already shipped in 0.3.0.
+- Imagen 4 as a distinct provider (13.1) remains **cancelled** (dropped in
+  v0.3.0, shutdown imminent).
+
+---
+
 ## 2. Current State Assessment
 
 ### 2.1 File Inventory (22 source files)

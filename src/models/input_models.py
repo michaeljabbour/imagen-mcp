@@ -487,6 +487,71 @@ class EditImageInput(BaseModel):
     )
 
 
+class CostEstimateInput(BaseModel):
+    """Input model for the estimate_cost tool."""
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        validate_assignment=True,
+        extra="forbid",
+    )
+
+    prompt: str = Field(
+        ...,
+        description="Prompt to estimate cost for (used for auto provider selection).",
+        min_length=1,
+        max_length=4000,
+    )
+
+    provider: Provider | None = Field(
+        default=Provider.AUTO,
+        description="Provider to estimate for: 'auto', 'openai', or 'gemini'.",
+    )
+
+    quality: str | None = Field(
+        default=None,
+        description="Quality tier (OpenAI): 'auto' / 'low' / 'medium' / 'high'.",
+    )
+
+    size: str | None = Field(
+        default=None,
+        description="Image size (provider-specific, e.g. '1024x1024' or '2K').",
+    )
+
+    n: int = Field(
+        default=1,
+        description="Number of images to estimate for (1-10).",
+        ge=1,
+        le=10,
+    )
+
+    output_format: OutputFormat | None = Field(
+        default=OutputFormat.MARKDOWN,
+        description="Output format for the tool response.",
+    )
+
+
+class ImageRefinementElicitation(BaseModel):
+    """Schema for MCP Elicitation during conversational refinement.
+
+    All fields are optional so the client can render a lightweight form;
+    whatever the user fills in is appended to the prompt.
+    """
+
+    style: str | None = Field(
+        default=None,
+        description="Visual style, e.g. photorealistic, illustration, oil-painting.",
+    )
+    mood: str | None = Field(
+        default=None,
+        description="Desired mood, e.g. warm, dramatic, serene.",
+    )
+    additional_details: str | None = Field(
+        default=None,
+        description="Any other details to incorporate into the image.",
+    )
+
+
 class ListConversationsInput(BaseModel):
     """Input model for listing saved conversations."""
 

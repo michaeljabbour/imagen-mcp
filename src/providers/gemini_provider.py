@@ -370,9 +370,15 @@ class GeminiProvider(ImageProvider):
             if not extraction["images"]:
                 raise ValueError("No image data found in Gemini API response")
 
-            # Save first image using base class method
+            # Save first image using base class method. Nano Banana usually
+            # returns one image per call, but if the model returns several
+            # (batch), persist the extras to additional_paths.
             image_b64 = extraction["images"][0]
             image_path = await self._save_image(image_b64, prompt, output_path)
+
+            additional_paths: list[Any] = []
+            for extra_b64 in extraction["images"][1:]:
+                additional_paths.append(await self._save_image(extra_b64, prompt, output_path))
 
             # Store in persistent conversation store
             self._store_conversation_message(
@@ -398,6 +404,7 @@ class GeminiProvider(ImageProvider):
                 provider=self.name,
                 model=model_id,
                 image_path=image_path,
+                additional_paths=additional_paths or None,
                 prompt=prompt,
                 size=size,
                 aspect_ratio=aspect_ratio,

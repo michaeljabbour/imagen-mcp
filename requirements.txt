@@ -1,25 +1,16 @@
-# imagen-mcp: Multi-Provider Image Generation Server
-# Install with: pip install -r requirements.txt
+# imagen-mcp runtime dependencies.
+#
+# pyproject.toml is the single source of truth for dependencies. This file
+# mirrors the runtime deps for `pip install -r requirements.txt` users.
+# For development, install the dev extra instead:
+#
+#     pip install -e ".[dev]"      (or)      uv sync --extra dev
+#
+# The server uses the FastMCP bundled in the `mcp` SDK, not the standalone
+# `fastmcp` package (see MODERNIZATION_PLAN.md Phase 8).
 
-# MCP SDK for Python
-mcp>=1.16.0
-
-# FastMCP framework with Image utilities
-fastmcp>=2.12.5
-
-# Data validation
+mcp>=1.26.0
 pydantic>=2.12.3
-
-# Async HTTP client (for OpenAI provider)
-httpx>=0.24.0
-
-# Google Gemini SDK (for Gemini/Nano Banana Pro provider)
-google-genai>=1.52.0
-
-# Image processing (required for Gemini reference images)
-pillow>=10.4.0
-
-# Optional: For development and testing
-pytest>=7.0.0
-pytest-asyncio>=0.21.0
-python-dotenv>=1.0.0
+httpx>=0.28.0
+google-genai>=1.54.0
+pillow>=11.0.0

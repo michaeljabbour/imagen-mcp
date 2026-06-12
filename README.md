@@ -188,11 +188,16 @@ generate_image(prompt="...", provider="gemini")
 
 | Tool | Description |
 |------|-------------|
-| `generate_image` | Main tool with auto provider selection |
-| `conversational_image` | Multi-turn refinement with dialogue and history |
+| `generate_image` | Main tool with auto provider selection (reports progress) |
+| `conversational_image` | Multi-turn refinement; native MCP elicitation with dialogue fallback |
+| `edit_image` | Edit/inpaint an existing image via OpenAI gpt-image-2 |
 | `list_conversations` | List active conversations and their history |
 | `list_providers` | Show available providers and capabilities |
 | `list_gemini_models` | Query available Gemini image models |
+| `estimate_cost` | Approximate generation cost without generating |
+
+All tools advertise MCP tool annotations (read-only / open-world hints) so
+clients can reason about their side effects.
 
 ## Output Location
 
@@ -310,6 +315,8 @@ flowchart TB
 | `IMAGEN_MCP_LOG_DIR` | Log directory override | No |
 | `IMAGEN_MCP_LOG_LEVEL` | Log level (DEBUG, INFO, etc.) | No |
 | `IMAGEN_MCP_LOG_PROMPTS` | Log full prompts | No (default: `false`) |
+| `IMAGEN_MCP_TRANSPORT` | `stdio` (default), `streamable-http`, or `sse` | No |
+| `IMAGEN_MCP_HOST` / `IMAGEN_MCP_PORT` | Bind address for HTTP transports | No (default: `127.0.0.1:8000`) |
 
 ## Troubleshooting
 
@@ -337,17 +344,25 @@ python3 -c "from src.providers import get_provider_registry; print(get_provider_
 ## Development
 
 ```bash
-# Clone and install
+# Clone and install (runtime + dev tooling)
 git clone https://github.com/michaeljabbour/imagen-mcp.git
 cd imagen-mcp
-pip install -r requirements.txt
+pip install -e ".[dev]"          # or: uv sync --extra dev
 
-# Run tests
-pip install pytest pytest-asyncio
-pytest tests/ -v
+# Install pre-commit hooks (ruff + mypy)
+pre-commit install
+
+# Run the full quality gate (same as CI)
+ruff format --check src/ tests/
+ruff check src/ tests/
+mypy src/
+pytest --cov=src --cov-fail-under=80
 
 # Verify server loads
 python3 -c "from src.server import mcp; print('Server loads')"
+
+# Run over HTTP instead of stdio
+IMAGEN_MCP_TRANSPORT=streamable-http imagen-mcp
 
 # Check Claude Desktop logs (macOS)
 tail -f ~/Library/Logs/Claude/mcp-server-imagen.log
