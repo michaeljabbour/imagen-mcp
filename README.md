@@ -312,6 +312,7 @@ flowchart TB
 | `DEFAULT_OPENAI_SIZE` | Default OpenAI image size | No (default: `1024x1024`) |
 | `DEFAULT_GEMINI_SIZE` | Default Gemini image size | No (default: `2K`) |
 | `ENABLE_GOOGLE_SEARCH` | Enable Google Search grounding | No (default: `false`) |
+| `REQUEST_TIMEOUT` | Read-timeout ceiling in seconds for provider calls (covers slow high-quality renders) | No (default: `600`) |
 | `IMAGEN_MCP_LOG_DIR` | Log directory override | No |
 | `IMAGEN_MCP_LOG_LEVEL` | Log level (DEBUG, INFO, etc.) | No |
 | `IMAGEN_MCP_LOG_PROMPTS` | Log full prompts | No (default: `false`) |

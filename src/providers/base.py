@@ -295,6 +295,7 @@ class ImageProvider(ABC):
         *args: Any,
         max_retries: int = MAX_RETRIES,
         base_delay: float = 1.0,
+        non_retryable: tuple[type[BaseException], ...] = (),
         **kwargs: Any,
     ) -> Any:
         """
@@ -305,6 +306,9 @@ class ImageProvider(ABC):
             *args: Positional arguments for func
             max_retries: Maximum retry attempts
             base_delay: Base delay between retries (doubles each attempt)
+            non_retryable: Exception types that should fail immediately instead
+                of being retried (e.g. timeouts on long-running renders, where
+                retrying just multiplies the wait).
             **kwargs: Keyword arguments for func
 
         Returns:
@@ -318,6 +322,9 @@ class ImageProvider(ABC):
         for attempt in range(max_retries):
             try:
                 return await func(*args, **kwargs)
+            except non_retryable:
+                # Fail fast — retrying won't help these.
+                raise
             except Exception as e:
                 last_error = e
                 if attempt < max_retries - 1:

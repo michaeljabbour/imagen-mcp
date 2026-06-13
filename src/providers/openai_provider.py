@@ -85,10 +85,17 @@ class OpenAIProvider(ImageProvider):
     # ------------------------------------------------------------------
 
     def _ensure_client(self) -> httpx.AsyncClient:
-        """Return the shared httpx client, creating it lazily."""
+        """Return the shared httpx client, creating it lazily.
+
+        Uses a short connect timeout (fail fast on network issues) but a
+        generous read/write/pool ceiling so slow high-quality gpt-image-2
+        renders aren't cut off mid-generation. The ceiling is configurable
+        via ``REQUEST_TIMEOUT`` (seconds).
+        """
         if self._client is None or self._client.is_closed:
+            timeout_s = float(get_settings().request_timeout)
             self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(120.0),
+                timeout=httpx.Timeout(timeout_s, connect=10.0),
                 limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
             )
         return self._client
@@ -195,7 +202,14 @@ class OpenAIProvider(ImageProvider):
             return cast("dict[str, Any]", response.json())
 
         try:
-            return cast("dict[str, Any]", await self._retry_with_backoff(_do_request))
+            # Don't retry timeouts: with a generous read ceiling, a genuinely
+            # stuck request should fail once (minutes), not be retried ×N.
+            return cast(
+                "dict[str, Any]",
+                await self._retry_with_backoff(
+                    _do_request, non_retryable=(httpx.TimeoutException,)
+                ),
+            )
         except httpx.HTTPStatusError as e:
             error_detail = e.response.text
             raise ValueError(f"OpenAI API error ({e.response.status_code}): {error_detail}") from e

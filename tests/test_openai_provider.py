@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 from src.providers.openai_provider import OpenAIProvider
@@ -177,3 +178,80 @@ class TestClientLifecycle:
         c1 = provider._ensure_client()
         c2 = provider._ensure_client()
         assert c1 is c2
+
+    def test_client_uses_configured_timeout(self, monkeypatch):
+        from src.config.settings import get_settings
+
+        monkeypatch.setenv("REQUEST_TIMEOUT", "300")
+        get_settings.cache_clear()
+
+        provider = OpenAIProvider(api_key="k")
+        client = provider._ensure_client()
+        # Generous read ceiling, short connect timeout.
+        assert client.timeout.read == 300.0
+        assert client.timeout.connect == 10.0
+
+
+class TestRetryBehavior:
+    @pytest.mark.asyncio
+    async def test_timeout_is_not_retried(self):
+        provider = OpenAIProvider(api_key="k")
+        calls = 0
+
+        async def boom():
+            nonlocal calls
+            calls += 1
+            raise httpx.ReadTimeout("render too slow")
+
+        with pytest.raises(httpx.ReadTimeout):
+            await provider._retry_with_backoff(boom, non_retryable=(httpx.TimeoutException,))
+        assert calls == 1  # failed once, no ×3 retry storm
+
+    @pytest.mark.asyncio
+    async def test_other_errors_still_retried(self, monkeypatch):
+        import src.providers.base as base
+
+        async def _no_sleep(_seconds):
+            return None
+
+        monkeypatch.setattr(base.asyncio, "sleep", _no_sleep)
+
+        provider = OpenAIProvider(api_key="k")
+        calls = 0
+
+        async def boom():
+            nonlocal calls
+            calls += 1
+            raise ValueError("transient")
+
+        with pytest.raises(ValueError):
+            await provider._retry_with_backoff(
+                boom, max_retries=3, non_retryable=(httpx.TimeoutException,)
+            )
+        assert calls == 3  # retried up to max_retries
+
+    @pytest.mark.asyncio
+    async def test_make_api_request_maps_timeout_without_retrying(self, monkeypatch):
+        import src.providers.base as base
+
+        async def _no_sleep(_seconds):
+            return None
+
+        monkeypatch.setattr(base.asyncio, "sleep", _no_sleep)
+
+        provider = OpenAIProvider(api_key="k")
+        post_calls = 0
+
+        class _Client:
+            is_closed = False
+
+            async def post(self, *a, **k):
+                nonlocal post_calls
+                post_calls += 1
+                raise httpx.ReadTimeout("slow")
+
+        monkeypatch.setattr(provider, "_ensure_client", lambda: _Client())
+
+        with pytest.raises(ValueError, match="API request failed"):
+            await provider._make_api_request("/images/generations", "k", json_data={})
+        assert post_calls == 1

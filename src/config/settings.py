@@ -27,8 +27,9 @@ class Settings:
     enable_prompt_enhancement: bool = True
     enable_google_search: bool = False  # Gemini-only feature
 
-    # Timeouts
-    request_timeout: int = 120
+    # Timeouts (seconds). Generous read ceiling for slow high-quality image
+    # renders; the OpenAI client pairs this with a short 10s connect timeout.
+    request_timeout: int = 600
 
     # Output
     output_dir: str | None = None
@@ -66,7 +67,7 @@ class Settings:
                 os.getenv("ENABLE_PROMPT_ENHANCEMENT", "true").lower() == "true"
             ),
             enable_google_search=os.getenv("ENABLE_GOOGLE_SEARCH", "false").lower() == "true",
-            request_timeout=int(os.getenv("REQUEST_TIMEOUT", "120")),
+            request_timeout=int(os.getenv("REQUEST_TIMEOUT", "600")),
             output_dir=os.getenv("OUTPUT_DIR"),
             log_dir=log_dir,
             log_level=log_level,
