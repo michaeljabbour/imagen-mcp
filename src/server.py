@@ -10,6 +10,7 @@ The server automatically selects the best provider based on prompt analysis,
 or allows explicit provider selection.
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -25,6 +26,8 @@ from .config.pricing import estimate_generation_cost, format_cost_estimate
 from .config.settings import get_settings
 from .exceptions import ImagenError, _sanitize_message
 from .models.input_models import (
+    BatchGenerationInput,
+    BatchItem,
     ConversationalImageInput,
     CostEstimateInput,
     EditImageInput,
@@ -111,6 +114,16 @@ async def _lifespan(_app: FastMCP) -> AsyncGenerator[None, None]:
         await registry.close_all()
     except Exception:
         logger.exception("Error during provider cleanup")
+
+    # Close the persistent conversation store (checkpoints the WAL). Only touch
+    # the existing singleton — don't create one just to close it.
+    try:
+        from .services import conversation_store as cs
+
+        if cs._store is not None:
+            cs._store.close()
+    except Exception:
+        logger.exception("Error closing conversation store")
 
 
 # Initialize MCP server
@@ -368,7 +381,9 @@ async def generate_image(params: ImageGenerationInput, ctx: Context | None = Non
             size=params.size,
             aspect_ratio=params.aspect_ratio,
             reference_images=params.reference_images,
-            enable_enhancement=params.enhance_prompt if params.enhance_prompt is not None else True,
+            enable_enhancement=params.enhance_prompt
+            if params.enhance_prompt is not None
+            else False,
             enable_google_search=params.enable_google_search or False,
             api_key=params.openai_api_key
             if recommendation.provider == "openai"
@@ -771,19 +786,8 @@ async def list_conversations(params: ListConversationsInput) -> str:
     try:
         registry = get_provider_registry()
 
-        # Ensure providers are initialized to get their conversations
-        # If we filter by provider, only initialize that one
-        if params.provider:
-            if registry.is_provider_available(params.provider):
-                registry.get_provider(params.provider)
-        else:
-            # Initialize all available
-            for p in registry.list_providers():
-                try:
-                    registry.get_provider(p)
-                except Exception:
-                    pass
-
+        # Read straight from the persistent store — no provider/network client
+        # construction (or API key) needed just to list conversations.
         conversations = registry.list_conversations(
             limit=params.limit or 10, provider_filter=params.provider
         )
@@ -974,6 +978,160 @@ async def estimate_cost(params: CostEstimateInput) -> str:
         logger.exception("Cost estimation failed")
         sanitized = _sanitize_message(str(e))
         return f"## ❌ Cost Estimation Failed\n\n**Error:** {sanitized}"
+
+
+@mcp.tool(
+    name="generate_image_batch",
+    annotations=ToolAnnotations(
+        title="Generate Image Batch",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=True,
+    ),
+)
+async def generate_image_batch(params: BatchGenerationInput, ctx: Context | None = None) -> str:
+    """Generate many images concurrently from a list of prompts.
+
+    Each item runs through the same auto provider selection as ``generate_image``,
+    bounded by ``max_concurrency``. Per-item failures are isolated — one bad
+    prompt does not fail the whole batch. Returns every result (saved paths plus
+    any per-item errors).
+
+    Use this instead of calling ``generate_image`` in a loop: 8 prompts that
+    would take ~4 minutes serially complete in roughly one generation's time
+    (subject to max_concurrency and provider rate limits).
+
+    Args:
+        params: The batch (items + concurrency + optional default provider).
+
+    Returns:
+        A formatted summary of all results.
+    """
+    batch_id = uuid4().hex[:12]
+    registry = get_provider_registry()
+    total = len(params.items)
+    semaphore = asyncio.Semaphore(params.max_concurrency)
+    progress_lock = asyncio.Lock()
+    done = 0
+
+    default_provider = (
+        params.default_provider.value
+        if params.default_provider and params.default_provider != Provider.AUTO
+        else None
+    )
+
+    log_event(
+        "image.batch.start",
+        batch_id=batch_id,
+        items=total,
+        max_concurrency=params.max_concurrency,
+    )
+
+    async def _run_one(index: int, item: BatchItem) -> dict[str, Any]:
+        nonlocal done
+        async with semaphore:
+            try:
+                explicit = (
+                    item.provider.value
+                    if item.provider and item.provider != Provider.AUTO
+                    else default_provider
+                )
+                provider, recommendation = registry.get_provider_for_prompt(
+                    item.prompt,
+                    size=item.size,
+                    reference_images=item.reference_images,
+                    enable_google_search=item.enable_google_search or False,
+                    explicit_provider=explicit,
+                    openai_api_key=params.openai_api_key,
+                    gemini_api_key=params.gemini_api_key,
+                )
+                openai_kwargs: dict[str, Any] = {}
+                if recommendation.provider == "openai":
+                    openai_kwargs = {
+                        "openai_model": item.openai_model,
+                        "quality": item.quality,
+                        "n": item.n,
+                    }
+                result = await provider.generate_image(
+                    item.prompt,
+                    size=item.size,
+                    aspect_ratio=item.aspect_ratio,
+                    reference_images=item.reference_images,
+                    enable_enhancement=False,
+                    enable_google_search=item.enable_google_search or False,
+                    api_key=params.openai_api_key
+                    if recommendation.provider == "openai"
+                    else params.gemini_api_key,
+                    model=item.gemini_model if recommendation.provider == "gemini" else None,
+                    output_path=item.output_path,
+                    **openai_kwargs,
+                )
+                return {
+                    "index": index,
+                    "prompt": item.prompt,
+                    "provider": recommendation.provider,
+                    "result": result,
+                }
+            except Exception as e:
+                sanitized = _sanitize_message(str(e))
+                log_event("image.batch.item.error", batch_id=batch_id, index=index, error=sanitized)
+                return {
+                    "index": index,
+                    "prompt": item.prompt,
+                    "provider": "unknown",
+                    "result": ImageResult(
+                        success=False,
+                        provider="unknown",
+                        model="unknown",
+                        prompt=item.prompt,
+                        error=sanitized,
+                    ),
+                }
+            finally:
+                async with progress_lock:
+                    done += 1
+                    await _report_progress(ctx, done, total, f"Generated {done}/{total}")
+
+    results = await asyncio.gather(
+        *(_run_one(i, item) for i, item in enumerate(params.items)),
+        return_exceptions=False,
+    )
+    results.sort(key=lambda r: r["index"])
+    succeeded = sum(1 for r in results if r["result"].success)
+
+    log_event("image.batch.result", batch_id=batch_id, total=total, succeeded=succeeded)
+
+    if params.output_format == OutputFormat.JSON:
+        data = {
+            "batch_id": batch_id,
+            "total": total,
+            "succeeded": succeeded,
+            "results": [
+                {
+                    "index": r["index"],
+                    "prompt": r["prompt"],
+                    "provider": r["provider"],
+                    **r["result"].to_dict(),
+                }
+                for r in results
+            ],
+        }
+        return json.dumps(data, indent=2, default=str)
+
+    lines = [f"## 🧺 Batch Generation — {succeeded}/{total} succeeded", ""]
+    for r in results:
+        res: ImageResult = r["result"]
+        snippet = r["prompt"][:60]
+        if res.success:
+            paths = [res.image_path, *(res.additional_paths or [])]
+            lines.append(f"### ✅ [{r['index']}] {snippet} ({r['provider']})")
+            lines.extend(f"- `{p}`" for p in paths if p)
+        else:
+            lines.append(f"### ❌ [{r['index']}] {snippet}")
+            lines.append(f"- **Error:** {res.error}")
+        lines.append("")
+    return "\n".join(lines)
 
 
 # ============================

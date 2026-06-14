@@ -343,7 +343,7 @@ class ImageProvider(ABC):
         limiter = get_rate_limiter()
         await limiter.acquire(self.name)
 
-    def _store_conversation_message(
+    async def _store_conversation_message(
         self,
         conversation_id: str,
         role: str,
@@ -353,6 +353,9 @@ class ImageProvider(ABC):
     ) -> None:
         """
         Store a message in the persistent conversation store.
+
+        SQLite I/O (a multi-MB INSERT + commit for image messages) is offloaded
+        to a worker thread so it never blocks the event loop.
 
         Args:
             conversation_id: Conversation ID
@@ -366,21 +369,28 @@ class ImageProvider(ABC):
 
             store = get_conversation_store()
 
-            # create_conversation uses INSERT OR REPLACE, so this is
-            # safe to call unconditionally — avoids an extra SELECT
-            # round-trip on every message.
-            store.create_conversation(conversation_id, self.name)
+            def _persist() -> None:
+                # create_conversation uses INSERT OR REPLACE, so this is
+                # safe to call unconditionally — avoids an extra SELECT
+                # round-trip on every message.
+                store.create_conversation(conversation_id, self.name)
+                store.add_message(conversation_id, role, content, image_base64, metadata)
 
-            store.add_message(conversation_id, role, content, image_base64, metadata)
+            await asyncio.to_thread(_persist)
         except Exception as e:
             logger.warning(f"Failed to persist conversation message: {e}")
 
-    def _get_conversation_history(self, conversation_id: str) -> list[dict[str, Any]]:
+    async def _get_conversation_history(
+        self, conversation_id: str, limit: int | None = None
+    ) -> list[dict[str, Any]]:
         """
-        Get conversation history from persistent store.
+        Get conversation history from persistent store (off the event loop).
 
         Args:
             conversation_id: Conversation ID
+            limit: Optional cap on the number of (most recent) messages to
+                replay — keeps long conversations from bloating the
+                Responses-API payload (and its latency).
 
         Returns:
             List of messages
@@ -389,14 +399,14 @@ class ImageProvider(ABC):
             from ..services.conversation_store import get_conversation_store
 
             store = get_conversation_store()
-            return store.get_messages(conversation_id)
+            return await asyncio.to_thread(store.get_messages, conversation_id, limit)
         except Exception as e:
             logger.warning(f"Failed to load conversation history: {e}")
             return []
 
-    def _get_last_image_from_conversation(self, conversation_id: str) -> str | None:
+    async def _get_last_image_from_conversation(self, conversation_id: str) -> str | None:
         """
-        Get the last generated image from a conversation.
+        Get the last generated image from a conversation (off the event loop).
 
         Args:
             conversation_id: Conversation ID
@@ -408,7 +418,7 @@ class ImageProvider(ABC):
             from ..services.conversation_store import get_conversation_store
 
             store = get_conversation_store()
-            return store.get_last_image(conversation_id)
+            return await asyncio.to_thread(store.get_last_image, conversation_id)
         except Exception as e:
             logger.warning(f"Failed to load last image from conversation: {e}")
             return None

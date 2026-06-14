@@ -187,11 +187,13 @@ class ImageGenerationInput(BaseModel):
 
     # --- Common options ---
     enhance_prompt: bool | None = Field(
-        default=True,
+        default=False,
         description=(
-            "Whether to enhance the prompt for better results. For OpenAI, "
-            "enables the multi-turn Responses-API flow (richer context). "
-            "When False, uses a direct /images/generations call for speed."
+            "Whether to enhance the prompt before generating. For OpenAI this "
+            "enables a multi-turn Responses-API flow (a gpt-5.1 prompt-refinement "
+            "round-trip BEFORE image generation) for richer context — at the cost "
+            "of extra latency. Defaults to False, which uses the fast direct "
+            "/images/generations call. Has no effect on Gemini."
         ),
     )
 
@@ -549,6 +551,79 @@ class ImageRefinementElicitation(BaseModel):
     additional_details: str | None = Field(
         default=None,
         description="Any other details to incorporate into the image.",
+    )
+
+
+class BatchItem(BaseModel):
+    """A single image request within a batch."""
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        validate_assignment=True,
+        extra="forbid",
+    )
+
+    prompt: str = Field(..., description="Image prompt.", min_length=1, max_length=4000)
+    provider: Provider | None = Field(
+        default=None,
+        description="Override provider for this item ('auto'/'openai'/'gemini'). "
+        "Falls back to the batch default_provider when omitted.",
+    )
+    size: str | None = Field(default=None, description="Image size (provider-specific).")
+    aspect_ratio: str | None = Field(default=None, description="Aspect ratio (Gemini).")
+    n: int | None = Field(
+        default=None, description="Images for this item (OpenAI, 1-10).", ge=1, le=10
+    )
+    quality: str | None = Field(default=None, description="Quality tier (OpenAI).")
+    gemini_model: str | None = Field(default=None, description="Specific Gemini model.")
+    openai_model: str | None = Field(default=None, description="Specific OpenAI model.")
+    reference_images: list[str] | None = Field(
+        default=None, description="Base64 reference images (Gemini)."
+    )
+    enable_google_search: bool | None = Field(
+        default=False, description="Google Search grounding (Gemini)."
+    )
+    output_path: str | None = Field(default=None, description="Optional save path for this item.")
+
+
+class BatchGenerationInput(BaseModel):
+    """Input model for concurrent multi-prompt image generation."""
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        validate_assignment=True,
+        extra="forbid",
+    )
+
+    items: list[BatchItem] = Field(
+        ...,
+        description="Image requests to generate concurrently.",
+        min_length=1,
+        max_length=50,
+    )
+
+    max_concurrency: int = Field(
+        default=4,
+        description="Maximum number of items generated at once (1-16).",
+        ge=1,
+        le=16,
+    )
+
+    default_provider: Provider | None = Field(
+        default=Provider.AUTO,
+        description="Provider used for items that don't specify their own.",
+    )
+
+    output_format: OutputFormat | None = Field(
+        default=OutputFormat.MARKDOWN,
+        description="Output format for the tool response.",
+    )
+
+    openai_api_key: str | None = Field(
+        default=None, repr=False, exclude=True, description="OpenAI API key override."
+    )
+    gemini_api_key: str | None = Field(
+        default=None, repr=False, exclude=True, description="Gemini API key override."
     )
 
 

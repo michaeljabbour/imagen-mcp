@@ -11,6 +11,7 @@ import base64
 import io
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from functools import partial
 from typing import Any
@@ -29,6 +30,20 @@ from ..config.settings import get_settings
 from .base import ImageProvider, ImageResult, ProviderCapabilities
 
 logger = logging.getLogger(__name__)
+
+# Dedicated thread pool for the (synchronous) google-genai SDK calls. Isolating
+# the long-running generate_content calls from the short asyncio.to_thread
+# filesystem/DB writes keeps a burst of image generations from starving the
+# default executor (and vice-versa).
+_gemini_executor: ThreadPoolExecutor | None = None
+
+
+def _get_gemini_executor() -> ThreadPoolExecutor:
+    global _gemini_executor
+    if _gemini_executor is None:
+        _gemini_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="gemini-sdk")
+    return _gemini_executor
+
 
 # Lazy import for google-genai (may not be installed)
 genai: Any = None
@@ -231,6 +246,38 @@ class GeminiProvider(ImageProvider):
         )
         return DEFAULT_GEMINI_IMAGE_MODEL
 
+    def _decode_images(
+        self, last_image_b64: str | None, reference_images: list[str] | None
+    ) -> tuple[list[Any], list[Any]]:
+        """Decode history + reference images into PIL objects (runs in a thread).
+
+        base64-decoding and PIL-opening up to 14 multi-MB images is CPU/IO heavy
+        and must not run on the event loop. Per-image failures are logged and
+        skipped. Returns ``(image_objects, images_to_close)`` — the caller
+        appends the objects to ``contents`` and closes them in its ``finally``.
+        """
+        objects: list[Any] = []
+        to_close: list[Any] = []
+
+        if last_image_b64:
+            try:
+                img = Image.open(io.BytesIO(base64.b64decode(last_image_b64)))
+                objects.append(img)
+                to_close.append(img)
+            except Exception as e:
+                logger.warning(f"Failed to load previous image from history: {e}")
+
+        if reference_images:
+            for ref_b64 in reference_images[:GEMINI_MAX_REFERENCE_IMAGES]:
+                try:
+                    img = Image.open(io.BytesIO(base64.b64decode(ref_b64)))
+                    objects.append(img)
+                    to_close.append(img)
+                except Exception as e:
+                    logger.warning(f"Failed to process reference image: {e}")
+
+        return objects, to_close
+
     async def generate_image(
         self,
         prompt: str,
@@ -283,28 +330,16 @@ class GeminiProvider(ImageProvider):
             pil_images_to_close: list[Any] = []
 
             try:
-                # Add previous image from conversation history if available
-                last_image_b64 = self._get_last_image_from_conversation(conversation_id)
-                if last_image_b64:
-                    try:
-                        last_image_bytes = base64.b64decode(last_image_b64)
-                        last_pil_image = Image.open(io.BytesIO(last_image_bytes))
-                        contents.append(last_pil_image)
-                        pil_images_to_close.append(last_pil_image)
-                        logger.info(f"Added prev image from conv {conversation_id} as context")
-                    except Exception as e:
-                        logger.warning(f"Failed to load previous image from history: {e}")
-
-                # Add reference images if provided (up to 14)
-                if reference_images:
-                    for ref_image_b64 in reference_images[:GEMINI_MAX_REFERENCE_IMAGES]:
-                        try:
-                            image_bytes = base64.b64decode(ref_image_b64)
-                            pil_image = Image.open(io.BytesIO(image_bytes))
-                            contents.append(pil_image)
-                            pil_images_to_close.append(pil_image)
-                        except Exception as e:
-                            logger.warning(f"Failed to process reference image: {e}")
+                # Decode the previous (history) image + any reference images off
+                # the event loop — base64-decoding and PIL-opening up to 14
+                # multi-MB images would otherwise block all other requests.
+                last_image_b64 = await self._get_last_image_from_conversation(conversation_id)
+                image_objects, pil_images_to_close = await asyncio.to_thread(
+                    self._decode_images, last_image_b64, reference_images
+                )
+                contents.extend(image_objects)
+                if last_image_b64 and image_objects:
+                    logger.info(f"Added prev image from conv {conversation_id} as context")
 
                 # Add prompt
                 contents.append(prompt)
@@ -344,7 +379,7 @@ class GeminiProvider(ImageProvider):
                     loop = asyncio.get_running_loop()
                     return await asyncio.wait_for(
                         loop.run_in_executor(
-                            None,
+                            _get_gemini_executor(),
                             partial(
                                 client.models.generate_content,
                                 model=model_id,
@@ -370,23 +405,24 @@ class GeminiProvider(ImageProvider):
             if not extraction["images"]:
                 raise ValueError("No image data found in Gemini API response")
 
-            # Save first image using base class method. Nano Banana usually
-            # returns one image per call, but if the model returns several
-            # (batch), persist the extras to additional_paths.
-            image_b64 = extraction["images"][0]
-            image_path = await self._save_image(image_b64, prompt, output_path)
-
-            additional_paths: list[Any] = []
-            for extra_b64 in extraction["images"][1:]:
-                additional_paths.append(await self._save_image(extra_b64, prompt, output_path))
+            # Save all images concurrently. Nano Banana usually returns one
+            # image per call, but if the model returns several (batch), the
+            # extras go to additional_paths. asyncio.gather preserves order.
+            images_b64 = extraction["images"]
+            image_b64 = images_b64[0]
+            saved_paths = await asyncio.gather(
+                *(self._save_image(b64, prompt, output_path) for b64 in images_b64)
+            )
+            image_path = saved_paths[0]
+            additional_paths: list[Any] = list(saved_paths[1:])
 
             # Store in persistent conversation store
-            self._store_conversation_message(
+            await self._store_conversation_message(
                 conversation_id,
                 "user",
                 prompt,
             )
-            self._store_conversation_message(
+            await self._store_conversation_message(
                 conversation_id,
                 "assistant",
                 {"type": "image_generated", "prompt": prompt},
@@ -486,8 +522,16 @@ class GeminiProvider(ImageProvider):
         }
 
         # Include grounding metadata if available
-        if hasattr(response, "grounding_metadata"):
-            result["grounding_metadata"] = response.grounding_metadata
+        # In google-genai 2.x, grounding metadata lives on the first candidate,
+        # not on the top-level response. Read it defensively via getattr so
+        # mocked responses without a `candidates` attribute simply yield no
+        # grounding metadata (and so Search-grounding citations aren't silently
+        # dropped on real responses).
+        candidates = getattr(response, "candidates", None)
+        candidate = candidates[0] if candidates else None
+        grounding = getattr(candidate, "grounding_metadata", None)
+        if grounding is not None:
+            result["grounding_metadata"] = grounding
 
         return result
 

@@ -189,6 +189,7 @@ generate_image(prompt="...", provider="gemini")
 | Tool | Description |
 |------|-------------|
 | `generate_image` | Main tool with auto provider selection (reports progress) |
+| `generate_image_batch` | Generate many prompts concurrently (bounded fan-out, per-item error isolation) |
 | `conversational_image` | Multi-turn refinement; native MCP elicitation with dialogue fallback |
 | `edit_image` | Edit/inpaint an existing image via OpenAI gpt-image-2 |
 | `list_conversations` | List active conversations and their history |
@@ -313,6 +314,8 @@ flowchart TB
 | `DEFAULT_GEMINI_SIZE` | Default Gemini image size | No (default: `2K`) |
 | `ENABLE_GOOGLE_SEARCH` | Enable Google Search grounding | No (default: `false`) |
 | `REQUEST_TIMEOUT` | Read-timeout ceiling in seconds for provider calls (covers slow high-quality renders) | No (default: `600`) |
+| `OPENAI_RPM` / `OPENAI_MIN_INTERVAL_SECONDS` / `OPENAI_BURST_LIMIT` | OpenAI client-side rate limits | No (defaults: `10` / `0.5` / `5`) |
+| `GEMINI_RPM` / `GEMINI_MIN_INTERVAL_SECONDS` / `GEMINI_BURST_LIMIT` | Gemini client-side rate limits | No (defaults: `15` / `0.5` / `5`) |
 | `IMAGEN_MCP_LOG_DIR` | Log directory override | No |
 | `IMAGEN_MCP_LOG_LEVEL` | Log level (DEBUG, INFO, etc.) | No |
 | `IMAGEN_MCP_LOG_PROMPTS` | Log full prompts | No (default: `false`) |

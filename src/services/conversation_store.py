@@ -10,6 +10,7 @@ import logging
 import os
 import sqlite3
 import stat
+import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
@@ -43,6 +44,10 @@ class ConversationStore:
         self.db_path = Path(db_path) if db_path else DEFAULT_DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
+        # Serializes access to the single shared connection. Required because
+        # providers offload DB I/O to worker threads (asyncio.to_thread), so the
+        # connection is touched from multiple threads.
+        self._lock = threading.Lock()
         self._init_db()
 
         # Restrict database file to owner-only read/write (0o600) so that
@@ -53,7 +58,10 @@ class ConversationStore:
     def _get_persistent_connection(self) -> sqlite3.Connection:
         """Return the persistent connection, creating it on first use."""
         if self._conn is None:
-            self._conn = sqlite3.connect(str(self.db_path))
+            # check_same_thread=False so the single connection can be used from
+            # asyncio.to_thread worker threads; the self._lock around
+            # _get_connection serializes all access so this stays safe.
+            self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
             # WAL mode gives better concurrent read performance
             self._conn.execute("PRAGMA journal_mode=WAL")
@@ -61,17 +69,23 @@ class ConversationStore:
 
     @contextmanager
     def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
-        """Get the persistent database connection."""
-        yield self._get_persistent_connection()
+        """Yield the persistent connection while holding the access lock.
+
+        Every read/write method goes through this, so holding the lock here
+        serializes all DB access across threads.
+        """
+        with self._lock:
+            yield self._get_persistent_connection()
 
     def close(self) -> None:
         """Close the persistent connection (call on shutdown)."""
-        if self._conn is not None:
-            try:
-                self._conn.close()
-            except Exception:
-                pass
-            self._conn = None
+        with self._lock:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
 
     def _init_db(self) -> None:
         """Initialize the database schema."""

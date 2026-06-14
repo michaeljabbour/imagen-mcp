@@ -44,9 +44,18 @@ def fake_env(monkeypatch, tmp_path):
 
     get_settings.cache_clear()
     get_provider_registry.cache_clear()
+    _reset_rate_limiter()
     yield
     get_settings.cache_clear()
     get_provider_registry.cache_clear()
+    _reset_rate_limiter()
+
+
+def _reset_rate_limiter() -> None:
+    """Drop the rate-limiter singleton so each test gets a fresh, isolated one."""
+    import src.services.rate_limiter as rl
+
+    rl._limiter = None
 
 
 @pytest.fixture

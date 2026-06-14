@@ -31,6 +31,16 @@ class Settings:
     # renders; the OpenAI client pairs this with a short 10s connect timeout.
     request_timeout: int = 600
 
+    # Client-side rate limiting (per provider). Tuned for parallelism: a small
+    # min-interval and a real burst allowance so concurrent requests aren't
+    # serialized. Raise the intervals if you hit provider 429s.
+    openai_rpm: int = 10
+    openai_min_interval_seconds: float = 0.5
+    openai_burst_limit: int = 5
+    gemini_rpm: int = 15
+    gemini_min_interval_seconds: float = 0.5
+    gemini_burst_limit: int = 5
+
     # Output
     output_dir: str | None = None
 
@@ -68,6 +78,12 @@ class Settings:
             ),
             enable_google_search=os.getenv("ENABLE_GOOGLE_SEARCH", "false").lower() == "true",
             request_timeout=int(os.getenv("REQUEST_TIMEOUT", "600")),
+            openai_rpm=int(os.getenv("OPENAI_RPM", "10")),
+            openai_min_interval_seconds=float(os.getenv("OPENAI_MIN_INTERVAL_SECONDS", "0.5")),
+            openai_burst_limit=int(os.getenv("OPENAI_BURST_LIMIT", "5")),
+            gemini_rpm=int(os.getenv("GEMINI_RPM", "15")),
+            gemini_min_interval_seconds=float(os.getenv("GEMINI_MIN_INTERVAL_SECONDS", "0.5")),
+            gemini_burst_limit=int(os.getenv("GEMINI_BURST_LIMIT", "5")),
             output_dir=os.getenv("OUTPUT_DIR"),
             log_dir=log_dir,
             log_level=log_level,

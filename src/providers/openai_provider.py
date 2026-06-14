@@ -21,6 +21,7 @@ unchanged pixels between sequential edits.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -323,7 +324,9 @@ class OpenAIProvider(ImageProvider):
         messages: list[dict[str, Any]] = []
 
         # Replay history from persistent store
-        history = self._get_conversation_history(conversation_id)
+        # Replay only the most recent turns — caps the /chat/completions
+        # payload (and latency) on long-running conversations.
+        history = await self._get_conversation_history(conversation_id, limit=10)
         for msg in history:
             messages.append({"role": msg["role"], "content": msg["content"]})
 
@@ -393,7 +396,7 @@ class OpenAIProvider(ImageProvider):
         )
 
         # Persist user message
-        self._store_conversation_message(conversation_id, "user", current_message["content"])
+        await self._store_conversation_message(conversation_id, "user", current_message["content"])
 
         if not ("choices" in response and response["choices"]):
             return response
@@ -403,7 +406,7 @@ class OpenAIProvider(ImageProvider):
             return response
 
         assistant_message = choice["message"]
-        self._store_conversation_message(
+        await self._store_conversation_message(
             conversation_id, "assistant", assistant_message.get("content", "")
         )
 
@@ -604,7 +607,7 @@ class OpenAIProvider(ImageProvider):
         reference_images: list[str] | None = None,
         enable_enhancement: bool = True,
         api_key: str | None = None,
-        assistant_model: str = "gpt-4o",
+        assistant_model: str = "gpt-5.1",
         input_image_file_id: str | None = None,
         output_path: str | None = None,
         # New gpt-image-2 params (kwargs so base.ImageProvider.generate_image sig stays stable)
@@ -699,30 +702,33 @@ class OpenAIProvider(ImageProvider):
             additional_paths: list[Path] = []
             response_revised: str | None = None
 
-            for i, entry in enumerate(entries):
-                if "b64_json" not in entry:
-                    continue
-                save_path = await self._save_image(entry["b64_json"], prompt, output_path)
-                if image_path is None:
-                    image_path = save_path
-                    if entry.get("revised_prompt"):
-                        response_revised = entry["revised_prompt"]
-                else:
-                    additional_paths.append(save_path)
-                # Persist first image to conversation store for multi-turn
-                if i == 0:
-                    self._store_conversation_message(
-                        conversation_id,
-                        "assistant",
-                        {"type": "image_generated", "prompt": prompt},
-                        image_base64=entry["b64_json"],
-                        metadata={
-                            "size": size,
-                            "model": image_model,
-                            "quality": quality,
-                            "output_format": output_format,
-                        },
+            valid_entries = [e for e in entries if "b64_json" in e]
+            if valid_entries:
+                # Save all images concurrently (each write is offloaded to a
+                # thread); asyncio.gather preserves order.
+                saved_paths = await asyncio.gather(
+                    *(
+                        self._save_image(entry["b64_json"], prompt, output_path)
+                        for entry in valid_entries
                     )
+                )
+                image_path = saved_paths[0]
+                additional_paths = list(saved_paths[1:])
+                if valid_entries[0].get("revised_prompt"):
+                    response_revised = valid_entries[0]["revised_prompt"]
+                # Persist the first image to the conversation store for multi-turn.
+                await self._store_conversation_message(
+                    conversation_id,
+                    "assistant",
+                    {"type": "image_generated", "prompt": prompt},
+                    image_base64=valid_entries[0]["b64_json"],
+                    metadata={
+                        "size": size,
+                        "model": image_model,
+                        "quality": quality,
+                        "output_format": output_format,
+                    },
+                )
 
             generation_time = time.time() - start_time
 
@@ -826,8 +832,6 @@ class OpenAIProvider(ImageProvider):
                     raise ValueError(f"n must be between 1 and {OPENAI_MAX_N}.")
 
             # Resolve + read files (async to avoid blocking the event loop)
-            import asyncio
-
             img_path = Path(image_path).expanduser().resolve()
             if not img_path.is_file():
                 raise ValueError(f"Source image not found: {img_path}")
@@ -890,16 +894,18 @@ class OpenAIProvider(ImageProvider):
             saved_path: Path | None = None
             additional_paths: list[Path] = []
             response_revised: str | None = None
-            for entry in entries:
-                if "b64_json" not in entry:
-                    continue
-                save_path = await self._save_image(entry["b64_json"], prompt, output_path)
-                if saved_path is None:
-                    saved_path = save_path
-                    if entry.get("revised_prompt"):
-                        response_revised = entry["revised_prompt"]
-                else:
-                    additional_paths.append(save_path)
+            valid_entries = [e for e in entries if "b64_json" in e]
+            if valid_entries:
+                saved_paths = await asyncio.gather(
+                    *(
+                        self._save_image(entry["b64_json"], prompt, output_path)
+                        for entry in valid_entries
+                    )
+                )
+                saved_path = saved_paths[0]
+                additional_paths = list(saved_paths[1:])
+                if valid_entries[0].get("revised_prompt"):
+                    response_revised = valid_entries[0]["revised_prompt"]
 
             generation_time = time.time() - start_time
 

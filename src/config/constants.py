@@ -9,9 +9,11 @@ aspect ratios, quality tiers, and model identifiers.
 # OpenAI gpt-image-2 Constants
 # ============================
 #
-# Verified against openai>=2.31.0 SDK (images.generate / images.edit signatures).
-# The SDK is the source of truth; these constants mirror the typed literal
-# options so validate_params() can reject anything the API will reject.
+# Hand-maintained against the OpenAI REST API (/v1/images/generations and
+# /v1/images/edits). This server calls the REST endpoints directly via httpx —
+# there is no `openai` Python SDK dependency — so these constants mirror the
+# documented request options and let validate_params() reject anything the API
+# would reject.
 
 OPENAI_API_BASE_URL = "https://api.openai.com/v1"
 
@@ -28,7 +30,7 @@ OPENAI_MODELS = {
 # Default OpenAI model for image generation (ChatGPT Images 2.0)
 DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-2"
 
-# Sizes supported by the /images/generations endpoint (per SDK 2.31.0 literal).
+# Sizes supported by the /images/generations endpoint.
 # gpt-image-2 adds ultrawide (1792x1024) and ultratall (1024x1792) over 1.x.
 OPENAI_SIZES = [
     "auto",  # Let the model choose
@@ -41,7 +43,7 @@ OPENAI_SIZES = [
     "256x256",  # Thumbnail (legacy)
 ]
 
-# Sizes supported by the /images/edits endpoint (per SDK 2.31.0 literal).
+# Sizes supported by the /images/edits endpoint.
 # Note: edits do NOT support 1792x1024 / 1024x1792.
 OPENAI_EDIT_SIZES = [
     "auto",

@@ -6,7 +6,6 @@ for creating and accessing providers.
 """
 
 import logging
-from datetime import datetime
 from functools import lru_cache
 from importlib.util import find_spec
 from typing import Any
@@ -211,40 +210,23 @@ class ProviderRegistry:
         self, limit: int = 10, provider_filter: str | None = None
     ) -> list[dict[str, Any]]:
         """
-        List conversations from all initialized providers.
+        List recent conversations directly from the persistent store.
+
+        Reads SQLite directly — no provider instantiation, API key, or network
+        client construction is required just to list conversations. The store's
+        own query already sorts by recency and computes message counts.
 
         Args:
-            limit: Max conversations to return total
+            limit: Max conversations to return
             provider_filter: Optional provider name to filter by
 
         Returns:
-            Combined list of conversations
+            List of conversation summaries
         """
-        all_conversations = []
+        from ..services.conversation_store import get_conversation_store
 
-        # Determine which providers to query
-        providers_to_check = []
-        if provider_filter:
-            if provider_filter in self._providers:
-                providers_to_check.append(self._providers[provider_filter])
-        else:
-            providers_to_check = list(self._providers.values())
-
-        # Collect conversations
-        for provider in providers_to_check:
-            try:
-                # We request 'limit' from each to ensure we have enough to sort
-                all_conversations.extend(provider.get_conversations(limit))
-            except Exception as e:
-                logger.warning(f"Failed to list conversations for {provider.name}: {e}")
-
-        # Sort by updated time (if available) or ID
-        all_conversations.sort(
-            key=lambda x: (x.get("updated", datetime.min), x.get("id", "")),
-            reverse=True,
-        )
-
-        return all_conversations[:limit]
+        store = get_conversation_store()
+        return store.list_conversations(provider=provider_filter, limit=limit)
 
 
 @lru_cache(maxsize=1)

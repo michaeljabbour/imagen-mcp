@@ -31,17 +31,18 @@ class ProviderState:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
-# Default configs per provider
+# Default configs per provider (fallback when no settings-derived config is
+# supplied). Tuned for parallelism — small interval, real burst allowance.
 DEFAULT_CONFIGS: dict[str, RateLimitConfig] = {
     "openai": RateLimitConfig(
         requests_per_minute=10,
-        min_interval_seconds=2.0,  # OpenAI is slower, space out more
-        burst_limit=2,
+        min_interval_seconds=0.5,
+        burst_limit=5,
     ),
     "gemini": RateLimitConfig(
         requests_per_minute=15,
-        min_interval_seconds=1.0,
-        burst_limit=3,
+        min_interval_seconds=0.5,
+        burst_limit=5,
     ),
 }
 
@@ -86,6 +87,12 @@ class RateLimiter:
         state = self._get_state(provider)
         config = self._get_config(provider)
 
+        # Compute the required wait AND reserve the slot under the lock, then
+        # release the lock BEFORE sleeping. Holding the lock across the sleep
+        # (the previous behavior) turned the limiter into a global mutex that
+        # serialized every request — the opposite of what we want for batch
+        # parallelism. Reserving a future timestamp lets concurrent callers
+        # stagger themselves without blocking each other.
         async with state.lock:
             now = time.time()
 
@@ -93,39 +100,33 @@ class RateLimiter:
             cutoff = now - 60
             state.request_times = [t for t in state.request_times if t > cutoff]
 
-            # Check requests per minute
-            if len(state.request_times) >= config.requests_per_minute:
-                # Wait until oldest request falls out of window
-                oldest = state.request_times[0]
-                wait_time = 60 - (now - oldest) + 0.1
-                if wait_time > 0:
-                    logger.info(
-                        f"Rate limit: waiting {wait_time:.1f}s for {provider} "
-                        f"(hit {config.requests_per_minute}/min limit)"
-                    )
-                    await asyncio.sleep(wait_time)
-                    now = time.time()
+            wait_time = 0.0
 
-            # Check minimum interval
+            # Requests-per-minute window
+            if len(state.request_times) >= config.requests_per_minute:
+                oldest = state.request_times[0]
+                wait_time = max(wait_time, 60 - (now - oldest) + 0.1)
+
+            # Minimum interval between requests
             time_since_last = now - state.last_request_time
             if time_since_last < config.min_interval_seconds:
-                wait_time = config.min_interval_seconds - time_since_last
-                logger.debug(f"Rate limit: waiting {wait_time:.2f}s for min interval")
-                await asyncio.sleep(wait_time)
-                now = time.time()
+                wait_time = max(wait_time, config.min_interval_seconds - time_since_last)
 
-            # Check burst limit (requests in last 5 seconds)
+            # Burst limit (requests in the last 5 seconds)
             recent_cutoff = now - 5
             recent_requests = sum(1 for t in state.request_times if t > recent_cutoff)
             if recent_requests >= config.burst_limit:
-                wait_time = 2.0  # Brief pause to avoid bursting
-                logger.debug(f"Rate limit: burst pause {wait_time}s for {provider}")
-                await asyncio.sleep(wait_time)
-                now = time.time()
+                wait_time = max(wait_time, 2.0)
 
-            # Record this request
-            state.last_request_time = now
-            state.request_times.append(now)
+            # Reserve this request at its projected start time so the next
+            # caller schedules itself after us (staggering, not serializing).
+            reserved = now + wait_time
+            state.last_request_time = reserved
+            state.request_times.append(reserved)
+
+        if wait_time > 0:
+            logger.debug("Rate limit: %s waiting %.2fs before request", provider, wait_time)
+            await asyncio.sleep(wait_time)
 
 
 # Singleton instance
@@ -133,8 +134,23 @@ _limiter: RateLimiter | None = None
 
 
 def get_rate_limiter() -> RateLimiter:
-    """Get the singleton rate limiter instance."""
+    """Get the singleton rate limiter instance, configured from settings."""
     global _limiter
     if _limiter is None:
-        _limiter = RateLimiter()
+        from ..config.settings import get_settings
+
+        s = get_settings()
+        configs = {
+            "openai": RateLimitConfig(
+                requests_per_minute=s.openai_rpm,
+                min_interval_seconds=s.openai_min_interval_seconds,
+                burst_limit=s.openai_burst_limit,
+            ),
+            "gemini": RateLimitConfig(
+                requests_per_minute=s.gemini_rpm,
+                min_interval_seconds=s.gemini_min_interval_seconds,
+                burst_limit=s.gemini_burst_limit,
+            ),
+        }
+        _limiter = RateLimiter(configs)
     return _limiter

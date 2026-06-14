@@ -7,6 +7,7 @@ calls happen.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 from pathlib import Path
@@ -16,6 +17,8 @@ import pytest
 
 from src import server
 from src.models.input_models import (
+    BatchGenerationInput,
+    BatchItem,
     ConversationalImageInput,
     CostEstimateInput,
     EditImageInput,
@@ -236,3 +239,72 @@ class TestEstimateCost:
         assert data["provider"] == "openai"
         assert data["n"] == 2
         assert data["total_usd"] is not None
+
+
+# --------------------------------------------------------------------------
+# generate_image_batch
+# --------------------------------------------------------------------------
+
+
+class TestGenerateImageBatch:
+    @pytest.mark.asyncio
+    async def test_batch_all_succeed(self, fake_registry):
+        items = [BatchItem(prompt=f"poster {i}") for i in range(3)]
+        out = await server.generate_image_batch(BatchGenerationInput(items=items))
+        assert "3/3 succeeded" in out
+        for i in range(3):
+            assert f"[{i}]" in out
+
+    @pytest.mark.asyncio
+    async def test_batch_per_item_failure_isolated(self, fake_registry):
+        _, provider, _ = fake_registry
+        # One of the three items raises; the batch must still return the others.
+        provider.generate_image.side_effect = [
+            make_result(),
+            RuntimeError("boom"),
+            make_result(),
+        ]
+        items = [BatchItem(prompt=f"poster {i}") for i in range(3)]
+        out = await server.generate_image_batch(BatchGenerationInput(items=items))
+        assert "2/3 succeeded" in out
+        assert "Error:" in out
+
+    @pytest.mark.asyncio
+    async def test_batch_json(self, fake_registry):
+        items = [BatchItem(prompt="a"), BatchItem(prompt="b")]
+        out = await server.generate_image_batch(
+            BatchGenerationInput(items=items, output_format=OutputFormat.JSON)
+        )
+        data = json.loads(out)
+        assert data["total"] == 2
+        assert data["succeeded"] == 2
+        assert len(data["results"]) == 2
+        # Results are ordered by index.
+        assert [r["index"] for r in data["results"]] == [0, 1]
+
+    @pytest.mark.asyncio
+    async def test_batch_progress_reported(self, fake_registry):
+        ctx = MagicMock()
+        ctx.report_progress = AsyncMock()
+        items = [BatchItem(prompt=f"p{i}") for i in range(4)]
+        await server.generate_image_batch(BatchGenerationInput(items=items), ctx=ctx)
+        # One progress report per completed item.
+        assert ctx.report_progress.await_count == 4
+
+    @pytest.mark.asyncio
+    async def test_batch_respects_concurrency_limit(self, fake_registry):
+        _, provider, _ = fake_registry
+        # Track concurrent in-flight calls; assert it never exceeds the cap.
+        state = {"current": 0, "peak": 0}
+
+        async def _slow(*args, **kwargs):
+            state["current"] += 1
+            state["peak"] = max(state["peak"], state["current"])
+            await asyncio.sleep(0)
+            state["current"] -= 1
+            return make_result()
+
+        provider.generate_image.side_effect = _slow
+        items = [BatchItem(prompt=f"p{i}") for i in range(8)]
+        await server.generate_image_batch(BatchGenerationInput(items=items, max_concurrency=2))
+        assert state["peak"] <= 2
